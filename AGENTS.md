@@ -45,6 +45,46 @@ The presence of a repository inside `external/` does not mean that the project h
 
 ---
 
+## LEGAL CONSIDERATIONS FOR FLUX.AI
+
+**IMPORTANT: This project builds an AI Electronics Design Platform inspired by Flux.ai, but IS NOT a copy of it.**
+
+### Patent Considerations
+
+Flux.ai is a proprietary commercial product. Before any commercial distribution:
+
+1. **SEARCH FOR PATENTS** - Refer to `research/flux-ai-patent-search.md`
+2. **DO NOT COPY** - Never implement Flux.ai's specific algorithms or methods
+3. **INDEPENDENT IMPLEMENTATION** - Write your own code from scratch
+
+### Trademark Considerations
+
+**DO NOT USE:**
+- "Flux" in project name, domain, or branding
+- Flux.ai logos, UI designs, or trademarks
+- Claims like "Flux.ai clone" or "open-source Flux"
+
+**SAFE REFENCES:**
+- "inspired by Flux.ai"
+- "similar architecture to commercial EDA platforms"
+- Pure technical analysis
+
+### Code Implementation Rules
+
+When implementing features similar to Flux.ai:
+
+❌ **NEVER:**
+- Copy existing Flux.ai source code
+- Reproduce proprietary algorithms
+- Use protected intellectual property
+
+✅ **ALWAYS:**
+- Study Flux.ai's features for understanding
+- Write independent implementations
+- Use only open-source dependencies via subprocess
+
+---
+
 ## External repositories are references only
 
 Every repository under `external/` should initially be considered:
