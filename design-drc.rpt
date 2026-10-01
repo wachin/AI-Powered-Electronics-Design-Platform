@@ -1,0 +1,13 @@
+** Drc report for design.kicad_pcb **
+** Created on 2026-09-30T23:52:27-0500 **
+
+** Found 1 DRC violations **
+[invalid_outline]: La placa tiene un contorno mal formado (no se han encontrado bordes en la capa Edge.Cuts)
+    Anulación local; error
+    @(0,0000 mm, 0,0000 mm): PCB
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **
