@@ -1,0 +1,36 @@
+[submodule "external/kicad"]
+	path = external/kicad
+	url = https://github.com/KiCad/kicad-source-mirror.git
+[submodule "external/kicad-tools"]
+	path = external/kicad-tools
+	url = https://github.com/rjwalters/kicad-tools.git
+[submodule "external/circuit-json"]
+	path = external/circuit-json
+	url = https://github.com/tscircuit/circuit-json.git
+[submodule "external/tscircuit"]
+	path = external/tscircuit
+	url = https://github.com/tscircuit/tscircuit.git
+[submodule "external/tscircuit-core"]
+	path = external/tscircuit-core
+	url = https://github.com/tscircuit/core.git
+[submodule "external/circuit-json-to-kicad"]
+	path = external/circuit-json-to-kicad
+	url = https://github.com/tscircuit/circuit-json-to-kicad.git
+[submodule "external/kicad-to-circuit-json"]
+	path = external/kicad-to-circuit-json
+	url = https://github.com/tscircuit/kicad-to-circuit-json.git
+[submodule "external/kicad-converter"]
+	path = external/kicad-converter
+	url = https://github.com/tscircuit/kicad-converter.git
+[submodule "external/circuit-json-to-tscircuit"]
+	path = external/circuit-json-to-tscircuit
+	url = https://github.com/tscircuit/circuit-json-to-tscircuit.git
+[submodule "external/skidl"]
+	path = external/skidl
+	url = https://github.com/devbisme/skidl.git
+[submodule "external/atopile"]
+	path = external/atopile
+	url = https://github.com/atopile/atopile.git
+[submodule "external/circuit-synth"]
+	path = external/circuit-synth
+	url = https://github.com/circuit-synth/circuit-synth.git
