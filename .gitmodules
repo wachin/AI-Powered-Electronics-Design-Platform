@@ -34,3 +34,63 @@
 [submodule "external/circuit-synth"]
 	path = external/circuit-synth
 	url = https://github.com/circuit-synth/circuit-synth.git
+[submodule "external/freerouting"]
+	path = external/freerouting
+	url = https://github.com/freerouting/freerouting.git
+[submodule "external/ngspice"]
+	path = external/ngspice
+	url = https://github.com/ngspice/ngspice.git
+[submodule "external/pyspice"]
+	path = external/pyspice
+	url = https://github.com/PySpice-org/PySpice.git
+[submodule "external/qucs-s"]
+	path = external/qucs-s
+	url = https://github.com/ra3xdh/qucs_s.git
+[submodule "external/yjs"]
+	path = external/yjs
+	url = https://github.com/yjs/yjs.git
+[submodule "external/automerge"]
+	path = external/automerge
+	url = https://github.com/automerge/automerge.git
+[submodule "external/kicad-mcp-server"]
+	path = external/kicad-mcp-server
+	url = https://github.com/Seeed-Studio/kicad-mcp-server.git
+[submodule "external/mcp-server-kicad"]
+	path = external/mcp-server-kicad
+	url = https://github.com/ProductOfAmerica/mcp-server-kicad.git
+[submodule "external/kicad-mcp"]
+	path = external/kicad-mcp
+	url = https://github.com/blwfish/kicad-mcp.git
+[submodule "external/konnect"]
+	path = external/konnect
+	url = https://github.com/shingo257/konnect.git
+[submodule "external/kicad-mcp-pro"]
+	path = external/kicad-mcp-pro
+	url = https://github.com/Kletternaut/kicad-mcp-pro.git
+[submodule "external/akcli"]
+	path = external/akcli
+	url = https://github.com/tipoLi5890/akcli.git
+[submodule "external/jlcparts"]
+	path = external/jlcparts
+	url = https://github.com/yaqwsx/jlcparts.git
+[submodule "external/jlcpcb-mcp"]
+	path = external/jlcpcb-mcp
+	url = https://github.com/eyalm321/jlcpcb-mcp.git
+[submodule "external/pcbparts-mcp"]
+	path = external/pcbparts-mcp
+	url = https://github.com/Averyy/pcbparts-mcp.git
+[submodule "external/digikey-kicad-library"]
+	path = external/digikey-kicad-library
+	url = https://github.com/Digi-Key/digikey-kicad-library.git
+[submodule "external/digikey-partner-kicad-library"]
+	path = external/digikey-partner-kicad-library
+	url = https://github.com/Digi-Key/digikey-partner-kicad-library.git
+[submodule "external/kicanvas"]
+	path = external/kicanvas
+	url = https://github.com/theacodes/KiCanvas.git
+[submodule "external/ecad-viewer"]
+	path = external/ecad-viewer
+	url = https://github.com/Huaqiu-Electronics/ecad-viewer.git
+[submodule "external/librepcb"]
+	path = external/librepcb
+	url = https://github.com/LibrePCB/LibrePCB.git
