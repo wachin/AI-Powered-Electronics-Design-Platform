@@ -1,25 +1,5 @@
 # AI-Powered Electronics Design Platform
 
-**⚠️ IMPORTANT: READ THIS ENTIRE FILE BEFORE USING THIS SOFTWARE**
-
----
-
-## Legal Notice
-
-**THIS SOFTWARE IS AN INDEPENDENT OPEN-SOURCE IMPLEMENTATION THAT DOES NOT COPY OR DERIVE FROM FLUX.AI**.
-
-Flux.ai is a proprietary commercial product. This project:
-
-- Is **NOT** affiliated with Flux Lab Inc.
-- Does **NOT** use Flux.ai's source code, trademarks, or proprietary assets
-- References Flux.ai **only** for technical analysis and educational purposes
-- Implements similar functionality using **only open-source tools**
-
-**READ THE FOLLOWING FILES FOR LEGAL INFORMATION:**
-- `LEGAL_NOTICE.md` - Legal considerations
-- `LEGAL_DISCLAIMER.md` - Detailed legal guidance
-- `research/flux-ai-patent-search.md` - How to search Flux.ai patents
-
 ---
 
 ## Project Purpose
@@ -130,8 +110,6 @@ Natural Language Prompt
 This project is licensed under **GNU GPL-3.0**.
 
 **Important:** The GPL-3.0 license applies to the code you write. External GPLv3 tools (KiCad, FreeRouting) are used via subprocess calls, which helps maintain license separation.
-
-**NOT LEGAL ADVICE:** Review with a qualified attorney.
 
 ---
 
@@ -273,14 +251,6 @@ AI-Powered-Electronics-Design-Platform/
 
 ---
 
-## Patent Search Before Commercial Use
-
-**YOU MUST SEARCH FOR FLUX.AI PATENTS BEFORE COMMERCIAL DISTRIBUTION.**
-
-See `research/flux-ai-patent-search.md` for instructions.
-
----
-
 ## Disclaimer
 
 THE AUTHORS PROVIDE NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT. THE AUTHORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
@@ -319,3 +289,25 @@ For legal/licensing questions, please consult a qualified attorney.
 
 *Copyright (C) 2024-2025 This Project*
 *Licensed under GNU GPL-3.0*
+
+---
+
+## Legal Notice
+
+**⚠️ IMPORTANT: READ THIS ENTIRE FILE BEFORE USING THIS SOFTWARE**
+
+---
+
+**THIS SOFTWARE IS AN INDEPENDENT OPEN-SOURCE IMPLEMENTATION THAT DOES NOT COPY OR DERIVE FROM FLUX.AI**.
+
+Flux.ai is a proprietary commercial product. This project:
+
+- Is **NOT** affiliated with Flux Lab Inc.
+- Does **NOT** use Flux.ai's source code, trademarks, or proprietary assets
+- References Flux.ai **only** for technical analysis and educational purposes
+- Implements similar functionality using **only open-source tools**
+
+**READ THE FOLLOWING FILES FOR LEGAL INFORMATION:**
+- `LEGAL_NOTICE.md` - Legal considerations
+- `LEGAL_DISCLAIMER.md` - Detailed legal guidance
+- `research/flux-ai-patent-search.md` - How to search Flux.ai patents
