@@ -1,0 +1,110 @@
+# === Node.js / Bun / TypeScript ===
+node_modules/
+.bun/
+dist/
+build/
+*.tsbuildinfo
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+venv/
+ENV/
+pip-wheel-metadata/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# === KiCad ===
+*-bak/
+*-cache.lib
+*-bak.lib
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.kicad_pro-bak
+*.kicad_sym-bak
+*.kicad_dru-bak
+*.kicad_wks-bak
+*~
+*.gbr
+*.gbrjob
+*.drl
+*.xln
+*.pos
+*.rpt
+*-drc.rpt
+*-erc.rpt
+manufacturing/
+gerbers/
+exports/
+
+# === Generated design output ===
+generated_design/
+design_result.json
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# === Logs ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-debug.log*
+
+# === Testing ===
+coverage/
+.nyc_output/
+
+# === OS ===
+Thumbs.db
+
+# === Temporary files ===
+*.tmp
+*.temp
+tmp/
+temp/
+
+# === Large binary files (if using Git LFS) ===
+# *.bin
+# *.so
+# *.dll
+# *.exe
+# *.o
+# *.a
+# *.lib
+
+# === Jupyter ===
+.ipynb_checkpoints/
+
+# === Secrets / Credentials ===
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+.env.local
+.env.*.local
+
+# === KiCad specific generated files ===
+fp-lib-table
+sym-lib-table
+*.bak
+*.swp
+*.swo
+
+# === Build artifacts ===
+*.egg-info/
+*.whl
+*.tar.gz
