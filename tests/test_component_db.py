@@ -22,7 +22,13 @@ def test_component_db_search():
 
 def test_component_db_get_by_mpn():
     db = ComponentDatabase()
-    res = db.get_by_mpn("C-10uF-0805")
+    # Test with the real Yageo MPN from fallback catalog
+    res = db.get_by_mpn("CC0805KRX7R9BB106")
     assert res is not None
     assert res.value == "10uF"
     assert res.package == "0805"
+    
+    # Also test with AMS1117
+    res2 = db.get_by_mpn("AMS1117-3.3")
+    assert res2 is not None
+    assert res2.category == "regulator_ldo"
