@@ -6,7 +6,9 @@ Pipeline:
 2. Component selection from catalog
 3. Circuit IR synthesis
 4. Deterministic ERC validation
-5. KiCad project compilation & manufacturing exports
+5. SPICE simulation (ngspice)
+6. KiCad project compilation & manufacturing exports
+7. PCB auto-routing (FreeRouting)
 """
 
 import json
@@ -24,12 +26,16 @@ from src.core.circuit_ir import (
 from src.core.erc import ERCValidator, ERCReport
 from src.generators.kicad_generator import KiCadGenerator
 from src.components.database import ComponentDatabase, ComponentSpec
+from src.simulation.ngspice import simulate_circuit, SimulationResult
+from src.routing.freerouting import route_kicad_pcb, RoutingResult
 
 
 @dataclass
 class DesignRequest:
     prompt: str
     project_name: str = "ai_generated_circuit"
+    run_spice: bool = True
+    run_routing: bool = True
 
 
 @dataclass
@@ -37,17 +43,31 @@ class DesignSummary:
     project_name: str
     circuit_ir: CircuitIR
     erc_report: ERCReport
+    spice_result: Optional[SimulationResult]
+    routing_result: Optional[RoutingResult]
     generated_files: Dict[str, Path]
     bom: List[Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "project_name": self.project_name,
             "circuit_ir": self.circuit_ir.to_dict(),
             "erc_report": self.erc_report.to_dict(),
             "generated_files": {k: str(v) for k, v in self.generated_files.items()},
             "bom": self.bom,
         }
+        if self.spice_result:
+            result["spice_result"] = {
+                "success": self.spice_result.success,
+                "stdout": self.spice_result.stdout[:2000] if self.spice_result.stdout else "",
+                "stderr": self.spice_result.stderr[:2000] if self.spice_result.stderr else "",
+            }
+        if self.routing_result:
+            result["routing_result"] = {
+                "success": self.routing_result.success,
+                "routed_pcb": str(self.routing_result.routed_ses_path) if self.routing_result.routed_ses_path else None,
+            }
+        return result
 
 
 class AIDesignOrchestrator:
@@ -62,24 +82,69 @@ class AIDesignOrchestrator:
         """
         Executes full end-to-end circuit synthesis pipeline.
         """
+        print("=" * 60)
+        print("🤖 AI-Powered Electronics Design Platform")
+        print("   Orchestration Flow")
+        print("=" * 60)
+
         # Step 1: Synthesize Circuit IR based on natural language analysis
+        print("\n📝 Step 1: Synthesizing Circuit IR from requirements...")
         circuit = self._synthesize_circuit_ir(request.prompt, request.project_name)
+        print(f"   ✅ Circuit IR created: {len(circuit.components)} components, {len(circuit.nets)} nets")
 
         # Step 2: Validate circuit with ERC
+        print("\n🔍 Step 2: Running ERC validation...")
         validator = ERCValidator(circuit)
         erc_report = validator.validate()
+        status = "✅ PASSED" if erc_report.passed else "❌ FAILED"
+        print(f"   {status} - Errors: {erc_report.summary['errors']}, Warnings: {erc_report.summary['warnings']}")
 
-        # Step 3: Compile KiCad EDA project files
+        # Step 3: SPICE Simulation (if requested)
+        spice_result = None
+        if request.run_spice:
+            print("\n⚡ Step 3: Running SPICE simulation (ngspice)...")
+            spice_result = simulate_circuit(circuit)
+            if spice_result.success:
+                print(f"   ✅ SPICE simulation completed successfully")
+            else:
+                print(f"   ⚠️  SPICE simulation failed: {spice_result.error or spice_result.stderr[:100]}")
+
+        # Step 4: Compile KiCad EDA project files
+        print("\n🔧 Step 4: Generating KiCad project files...")
         generator = KiCadGenerator(circuit)
         generated_files = generator.export_project(output_dir, request.project_name)
+        print(f"   ✅ Generated: SCH, PCB, PRO")
 
-        # Step 4: Generate Bill of Materials (BOM)
+        # Step 5: PCB Auto-routing with FreeRouting (if requested)
+        routing_result = None
+        if request.run_routing:
+            print("\n🛣️  Step 5: Running PCB auto-routing (FreeRouting)...")
+            pcb_path = generated_files["pcb"]
+            routing_result = route_kicad_pcb(pcb_path)
+            if routing_result.success:
+                print(f"   ✅ PCB auto-routing completed")
+                # Add routed PCB to generated files
+                if routing_result.routed_ses_path and routing_result.routed_ses_path.exists():
+                    generated_files["pcb_routed"] = routing_result.routed_ses_path
+            else:
+                print(f"   ⚠️  PCB auto-routing failed: {routing_result.error}")
+
+        # Step 6: Generate Bill of Materials (BOM)
+        print("\n📦 Step 6: Generating Bill of Materials...")
         bom = self._generate_bom(circuit)
+        total_cost = sum(item["total_price"] for item in bom)
+        print(f"   ✅ BOM generated: {len(bom)} unique parts, ~${total_cost:.2f} estimated")
+
+        print("\n" + "=" * 60)
+        print("🎉 Design synthesis complete!")
+        print("=" * 60)
 
         return DesignSummary(
             project_name=request.project_name,
             circuit_ir=circuit,
             erc_report=erc_report,
+            spice_result=spice_result,
+            routing_result=routing_result,
             generated_files=generated_files,
             bom=bom,
         )

@@ -14,7 +14,14 @@ from src.components.database import ComponentDatabase
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI-Powered Electronics Design Platform CLI"
+        description="AI-Powered Electronics Design Platform CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s -p "Design a 5V to 3.3V LDO regulator with LED indicator"
+  %(prog)s -p "Create a buck converter 12V to 5V" --no-spice --no-routing
+  %(prog)s -p "Simple LED blinker with 555 timer" -o ./my_project -n timer_555
+"""
     )
     parser.add_argument(
         "--prompt",
@@ -37,6 +44,16 @@ def main():
         default="ldo_regulator",
         help="Name of the output project",
     )
+    parser.add_argument(
+        "--no-spice",
+        action="store_true",
+        help="Disable SPICE simulation (ngspice)",
+    )
+    parser.add_argument(
+        "--no-routing",
+        action="store_true",
+        help="Disable PCB auto-routing (FreeRouting)",
+    )
 
     args = parser.parse_args()
 
@@ -46,18 +63,37 @@ def main():
     print("=" * 60)
     print(f"📝 Prompt: {args.prompt}")
     print(f"📁 Target Output: {output_dir.resolve()}")
+    print(f"🔬 SPICE Simulation: {'Disabled' if args.no_spice else 'Enabled'}")
+    print(f"🛣️  PCB Auto-routing: {'Disabled' if args.no_routing else 'Enabled'}")
     print("-" * 60)
 
     db = ComponentDatabase()
     orchestrator = AIDesignOrchestrator(db=db)
 
-    request = DesignRequest(prompt=args.prompt, project_name=args.project_name)
+    request = DesignRequest(
+        prompt=args.prompt,
+        project_name=args.project_name,
+        run_spice=not args.no_spice,
+        run_routing=not args.no_routing,
+    )
     summary = orchestrator.process_request(request, output_dir)
 
     print("\n🔍 ERC Report Summary:")
     print(f"  Status: {'✅ PASSED' if summary.erc_report.passed else '❌ FAILED'}")
     for k, v in summary.erc_report.summary.items():
         print(f"  - {k.capitalize()}: {v}")
+
+    if summary.spice_result:
+        print("\n⚡ SPICE Simulation:")
+        print(f"  Status: {'✅ SUCCESS' if summary.spice_result.success else '❌ FAILED'}")
+        if not summary.spice_result.success and summary.spice_result.error:
+            print(f"  Error: {summary.spice_result.error}")
+
+    if summary.routing_result:
+        print("\n🛣️  PCB Auto-routing:")
+        print(f"  Status: {'✅ SUCCESS' if summary.routing_result.success else '❌ FAILED'}")
+        if not summary.routing_result.success and summary.routing_result.error:
+            print(f"  Error: {summary.routing_result.error}")
 
     print("\n📦 Generated KiCad Files:")
     for file_type, file_path in summary.generated_files.items():
