@@ -1,9 +1,9 @@
 {
   "project_name": "ldo_regulator",
   "circuit_ir": {
-    "id": "dc994343-035d-473c-8e91-8ba35b059aa0",
+    "id": "59fea78a-db20-4827-bd3b-d15e61a107f9",
     "name": "ldo_regulator",
-    "description": "Design a 5V to 3.3V LDO regulator circuit with green LED indicator",
+    "description": "Find a 3.3V LDO 500mA SOT-23",
     "components": {
       "U1": {
         "ref": "U1",
@@ -47,7 +47,7 @@
         "component_type": "capacitor",
         "footprint": "Capacitor_SMD:C_0805_2012Metric",
         "symbol": "Device:C",
-        "mpn": "C-10uF-0805",
+        "mpn": "CC0805KRX7R9BB106",
         "manufacturer": null,
         "description": null,
         "pins": [
@@ -72,11 +72,11 @@
       },
       "C2": {
         "ref": "C2",
-        "value": "22uF",
+        "value": "10uF",
         "component_type": "capacitor",
         "footprint": "Capacitor_SMD:C_0805_2012Metric",
         "symbol": "Device:C",
-        "mpn": "C-22uF-0805",
+        "mpn": "CC0805KRX7R9BB106",
         "manufacturer": null,
         "description": null,
         "pins": [
@@ -105,7 +105,7 @@
         "component_type": "led",
         "footprint": "LED_SMD:LED_0805_2012Metric",
         "symbol": "Device:LED",
-        "mpn": "LED-GREEN-0805",
+        "mpn": "LTST-C190KGKT",
         "manufacturer": null,
         "description": null,
         "pins": [
@@ -130,11 +130,11 @@
       },
       "R1": {
         "ref": "R1",
-        "value": "330",
+        "value": "10k",
         "component_type": "resistor",
         "footprint": "Resistor_SMD:R_0805_2012Metric",
         "symbol": "Device:R",
-        "mpn": "R-330-0805",
+        "mpn": "RC0805FR-0710KL",
         "manufacturer": null,
         "description": null,
         "pins": [
@@ -278,31 +278,20 @@
       "total_price": 0.15
     },
     {
-      "mpn": "C-10uF-0805",
+      "mpn": "CC0805KRX7R9BB106",
       "value": "10uF",
       "footprint": "Capacitor_SMD:C_0805_2012Metric",
       "manufacturer": "Yageo",
-      "quantity": 1,
+      "quantity": 2,
       "designators": [
-        "C1"
-      ],
-      "unit_price": 0.02,
-      "total_price": 0.02
-    },
-    {
-      "mpn": "C-22uF-0805",
-      "value": "22uF",
-      "footprint": "Capacitor_SMD:C_0805_2012Metric",
-      "manufacturer": "Yageo",
-      "quantity": 1,
-      "designators": [
+        "C1",
         "C2"
       ],
-      "unit_price": 0.03,
-      "total_price": 0.03
+      "unit_price": 0.02,
+      "total_price": 0.04
     },
     {
-      "mpn": "LED-GREEN-0805",
+      "mpn": "LTST-C190KGKT",
       "value": "Green",
       "footprint": "LED_SMD:LED_0805_2012Metric",
       "manufacturer": "Lite-On",
@@ -314,8 +303,8 @@
       "total_price": 0.04
     },
     {
-      "mpn": "R-330-0805",
-      "value": "330",
+      "mpn": "RC0805FR-0710KL",
+      "value": "10k",
       "footprint": "Resistor_SMD:R_0805_2012Metric",
       "manufacturer": "Yageo",
       "quantity": 1,
