@@ -1,10 +1,50 @@
 ** Drc report for design.kicad_pcb **
-** Created on 2026-09-30T23:52:27-0500 **
+** Created on 2026-10-04T13:09:10-0500 **
 
-** Found 1 DRC violations **
-[invalid_outline]: La placa tiene un contorno mal formado (no se han encontrado bordes en la capa Edge.Cuts)
-    Anulación local; error
-    @(0,0000 mm, 0,0000 mm): PCB
+** Found 13 DRC violations **
+[lib_footprint_issues]: The current configuration does not include the footprint library 'tscircuit'.
+    Anulación local; warning
+    @(100,0000 mm, 100,0000 mm): Huella U1
+[lib_footprint_issues]: The current configuration does not include the footprint library 'tscircuit'.
+    Anulación local; warning
+    @(100,0000 mm, 104,7225 mm): Huella C1
+[lib_footprint_issues]: The current configuration does not include the footprint library 'tscircuit'.
+    Anulación local; warning
+    @(100,0000 mm, 107,6225 mm): Huella C2
+[lib_footprint_issues]: The current configuration does not include the footprint library 'tscircuit'.
+    Anulación local; warning
+    @(100,0000 mm, 110,5225 mm): Huella R1
+[lib_footprint_issues]: The current configuration does not include the footprint library 'tscircuit'.
+    Anulación local; warning
+    @(100,0000 mm, 100,0000 mm): Huella LED1
+[text_height]: Altura del texto fuera del rango (restricciones de configuración de placa para alto de texto de serigrafía altura mínima 0,8000 mm; real 0,6204 mm)
+    Regla: restricciones de configuración de placa para alto de texto de serigrafía; warning
+    @(100,0000 mm, 97,0775 mm): Reference field of U1
+[text_height]: Altura del texto fuera del rango (restricciones de configuración de placa para alto de texto de serigrafía altura mínima 0,8000 mm; real 0,4000 mm)
+    Regla: restricciones de configuración de placa para alto de texto de serigrafía; warning
+    @(100,0000 mm, 103,1225 mm): Reference field of C1
+[text_height]: Altura del texto fuera del rango (restricciones de configuración de placa para alto de texto de serigrafía altura mínima 0,8000 mm; real 0,4000 mm)
+    Regla: restricciones de configuración de placa para alto de texto de serigrafía; warning
+    @(100,0000 mm, 106,0225 mm): Reference field of C2
+[text_height]: Altura del texto fuera del rango (restricciones de configuración de placa para alto de texto de serigrafía altura mínima 0,8000 mm; real 0,4000 mm)
+    Regla: restricciones de configuración de placa para alto de texto de serigrafía; warning
+    @(100,0000 mm, 108,9225 mm): Reference field of R1
+[silk_overlap]: Solapamiento de serigrafía
+    Regla: restricciones de configuración de placa para serigrafía; warning
+    @(100,5167 mm, 97,4775 mm): Segmento of U1 on F.Silkscreen
+    @(100,0000 mm, 97,0775 mm): Reference field of U1
+[silk_overlap]: Solapamiento de serigrafía
+    Regla: restricciones de configuración de placa para serigrafía; warning
+    @(100,0000 mm, 97,0775 mm): Reference field of U1
+    @(100,4773 mm, 97,6752 mm): Segmento of U1 on F.Silkscreen
+[silk_overlap]: Solapamiento de serigrafía
+    Regla: restricciones de configuración de placa para serigrafía; warning
+    @(100,0000 mm, 106,0225 mm): Reference field of C2
+    @(98,3750 mm, 105,8225 mm): Segmento of C1 on F.Silkscreen
+[silk_overlap]: Solapamiento de serigrafía
+    Regla: restricciones de configuración de placa para serigrafía; warning
+    @(100,0000 mm, 108,9225 mm): Reference field of R1
+    @(98,3750 mm, 108,7225 mm): Segmento of C2 on F.Silkscreen
 
 ** Found 0 unconnected pads **
 

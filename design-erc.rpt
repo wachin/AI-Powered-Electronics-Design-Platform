@@ -1,0 +1,83 @@
+Informe de ERC (2026-10-04T13:09:08-0500, codificación UTF8)
+
+***** Hoja /
+[endpoint_off_grid]: Pin de símbolo o fin de cable fuera de cuadrícula de conexión
+    ; warning
+    @(139,50 mm, 37,93 mm): Symbol U1 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(139,50 mm, 37,93 mm): Symbol U1 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(139,50 mm, 40,93 mm): Symbol U1 Pin 2 [2, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(139,50 mm, 43,93 mm): Symbol U1 Pin 3 [3, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(139,50 mm, 46,93 mm): Symbol U1 Pin 4 [4, Pasivo, Línea]
+[lib_symbol_issues]: The current configuration does not include the symbol library 'Device'
+    ; warning
+    @(148,50 mm, 42,43 mm): Símbolo U1 [U_chip_soic8]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(157,50 mm, 37,93 mm): Symbol U1 Pin 8 [8, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(157,50 mm, 40,93 mm): Symbol U1 Pin 7 [7, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(157,50 mm, 43,93 mm): Symbol U1 Pin 6 [6, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(157,50 mm, 46,93 mm): Symbol U1 Pin 5 [5, Pasivo, Línea]
+[endpoint_off_grid]: Pin de símbolo o fin de cable fuera de cuadrícula de conexión
+    ; warning
+    @(144,00 mm, 80,23 mm): Symbol C1 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(144,00 mm, 80,23 mm): Symbol C1 Pin 1 [1, Pasivo, Línea]
+[lib_symbol_issues]: The current configuration does not include the symbol library 'Device'
+    ; warning
+    @(148,50 mm, 80,23 mm): Símbolo C1 [capacitor_right]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(153,00 mm, 80,23 mm): Symbol C1 Pin 2 [2, Pasivo, Línea]
+[endpoint_off_grid]: Pin de símbolo o fin de cable fuera de cuadrícula de conexión
+    ; warning
+    @(144,00 mm, 110,83 mm): Symbol C2 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(144,00 mm, 110,83 mm): Symbol C2 Pin 1 [1, Pasivo, Línea]
+[lib_symbol_issues]: The current configuration does not include the symbol library 'Device'
+    ; warning
+    @(148,50 mm, 110,83 mm): Símbolo C2 [capacitor_right]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(153,00 mm, 110,83 mm): Symbol C2 Pin 2 [2, Pasivo, Línea]
+[endpoint_off_grid]: Pin de símbolo o fin de cable fuera de cuadrícula de conexión
+    ; warning
+    @(144,00 mm, 140,23 mm): Symbol R1 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(144,00 mm, 140,23 mm): Symbol R1 Pin 1 [1, Pasivo, Línea]
+[lib_symbol_issues]: The current configuration does not include the symbol library 'Device'
+    ; warning
+    @(148,50 mm, 140,23 mm): Símbolo R1 [boxresistor_right]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(153,00 mm, 140,23 mm): Symbol R1 Pin 2 [2, Pasivo, Línea]
+[endpoint_off_grid]: Pin de símbolo o fin de cable fuera de cuadrícula de conexión
+    ; warning
+    @(140,40 mm, 170,19 mm): Symbol LED1 Pin 1 [1, Pasivo, Línea]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(140,40 mm, 170,19 mm): Symbol LED1 Pin 1 [1, Pasivo, Línea]
+[lib_symbol_issues]: The current configuration does not include the symbol library 'Device'
+    ; warning
+    @(148,50 mm, 170,19 mm): Símbolo LED1 [led_right]
+[pin_not_connected]: Pin no conectado
+    ; error
+    @(156,60 mm, 170,19 mm): Symbol LED1 Pin 2 [2, Pasivo, Línea]
+
+**Mensajes ERC: 26. Errores16, Avisos 10

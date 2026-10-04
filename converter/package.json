@@ -1,0 +1,21 @@
+{
+  "name": "circuit-json-to-kicad-converter",
+  "version": "1.0.0",
+  "description": "Circuit JSON to KiCad converter POC",
+  "main": "converter_circuit_json_to_kicad.ts",
+  "scripts": {
+    "convert": "bun run converter_circuit_json_to_kicad.ts"
+  },
+  "dependencies": {
+    "circuit-json": "latest",
+    "circuit-json-to-kicad": "latest",
+    "polygon-clipping": "^0.15.7",
+    "tscircuit": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  }
+}
