@@ -28,6 +28,7 @@ from src.generators.kicad_generator import KiCadGenerator
 from src.components.database import ComponentDatabase, ComponentSpec
 from src.simulation.ngspice import simulate_circuit, SimulationResult
 from src.routing.freerouting import route_kicad_pcb, RoutingResult
+from src.llm.integration import NLToCircuitPipeline, create_nl_pipeline
 
 
 @dataclass
@@ -75,8 +76,10 @@ class AIDesignOrchestrator:
     AI Orchestrator driving autonomous electronics design generation.
     """
 
-    def __init__(self, db: Optional[ComponentDatabase] = None):
+    def __init__(self, db: Optional[ComponentDatabase] = None, llm_provider: str = "mock"):
         self.db = db or ComponentDatabase()
+        self.nl_pipeline = create_nl_pipeline("mock")  # Use mock LLM for now
+        self.nl_pipeline.set_orchestrator(self)
 
     def process_request(self, request: DesignRequest, output_dir: Path) -> DesignSummary:
         """
@@ -87,9 +90,13 @@ class AIDesignOrchestrator:
         print("   Orchestration Flow")
         print("=" * 60)
 
-        # Step 1: Synthesize Circuit IR based on natural language analysis
+        # Step 1: Natural Language -> Circuit IR (using NL pipeline)
         print("\n📝 Step 1: Synthesizing Circuit IR from requirements...")
-        circuit = self._synthesize_circuit_ir(request.prompt, request.project_name)
+        print(f"   📝 Prompt: {request.prompt}")
+        
+        # Use NL pipeline to convert natural language to CircuitIR
+        import asyncio
+        circuit = asyncio.run(self.nl_pipeline.process(request.prompt, request.project_name))
         print(f"   ✅ Circuit IR created: {len(circuit.components)} components, {len(circuit.nets)} nets")
 
         # Step 2: Validate circuit with ERC
