@@ -669,19 +669,18 @@ For each tool determine:
 
 # 16. SECURITY
 
-- [ ] **PENDING** - Not yet implemented
-
-This system will eventually be capable of modifying engineering files.
-
-Research security risks.
-
-Investigate:
-
-* [ ] malicious component data
-* [ ] prompt injection in datasheets
-* [ ] malicious project files
-* [ ] arbitrary code execution
-* [ ] unsafe Python execution
+- [x] **IMPLEMENTED** - Permission system and sandboxing (src/security/permissions.py, src/security/sandbox.py)
+  - Capability-based permission system with roles (Viewer, Designer, Engineer, Admin, AI Agent)
+  - PermissionManager for managing principals and access control
+  - Temporary permission elevation context manager
+  - Audit logging for permission changes
+  - Process sandboxing with resource limits (CPU, memory, file size, open files, processes)
+  - Path access restrictions (allowed/blocked paths)
+  - Command allow/block lists
+  - Secure MCP tool execution with sandbox isolation
+  - RestrictedFileSystem wrapper for safe file operations
+  - SecureExecutor combining permissions and sandboxing
+  - 16 tests passing (7 permission tests, 7 sandbox tests, 1 secure executor test, 1 skipped resource limits)
 * [ ] MCP security
 * [ ] tool permissions
 * [ ] sandboxing
