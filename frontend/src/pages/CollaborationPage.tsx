@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useCollaborationRoom } from '../hooks/useCollaboration'
 import { apiClient } from '../lib/api'
+import { PCB3DViewer } from '../components/PCB3DViewer'
 
 interface CollaborationPageProps {
   roomId?: string
@@ -217,38 +218,50 @@ export function CollaborationPage({ roomId: initialRoomId }: CollaborationPagePr
         </div>
 
         <div className="room-canvas" ref={canvasRef}>
-          {/* This is where the collaborative schematic/PCB editor would go */}
-          <div className="canvas-placeholder">
-            <div className="placeholder-content">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M9 9h6v6H9z" />
-              </svg>
-              <h3>Collaborative Canvas</h3>
-              <p>Real-time schematic and PCB editing with Yjs</p>
-              <p className="hint">Other users' cursors will appear here</p>
-            </div>
-            
-            {/* Remote cursors overlay */}
-            <div className="remote-cursors">
-              {(roomInfo?.users || [])
-                .filter((u: any) => u.id !== '' && u.cursor)
-                .map((user: any) => (
-                  <div
-                    key={user.id}
-                    className="remote-cursor"
-                    style={{
-                      left: user.cursor!.x,
-                      top: user.cursor!.y,
-                      borderColor: user.color
-                    }}
-                  >
-                    <div className="cursor-label" style={{ backgroundColor: user.color }}>
-                      {user.name}
+          {/* 3D PCB Viewer */}
+          <div style={{ height: '50%', minHeight: '300px' }}>
+            <PCB3DViewer 
+              gltfUrl={roomInfo?.generated_files?.gltf ? `/api/files${roomInfo.generated_files.gltf}` : undefined}
+              boardWidth={100}
+              boardHeight={80}
+            />
+          </div>
+
+          {/* 2D Collaborative Canvas */}
+          <div style={{ height: '50%', minHeight: '300px', borderTop: '1px solid var(--border)' }}>
+            {/* This is where the collaborative schematic/PCB editor would go */}
+            <div className="canvas-placeholder">
+              <div className="placeholder-content">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 9h6v6H9z" />
+                </svg>
+                <h3>Collaborative Canvas</h3>
+                <p>Real-time schematic and PCB editing with Yjs</p>
+                <p className="hint">Other users' cursors will appear here</p>
+              </div>
+              
+              {/* Remote cursors overlay */}
+              <div className="remote-cursors">
+                {(roomInfo?.users || [])
+                  .filter((u: any) => u.id !== '' && u.cursor)
+                  .map((user: any) => (
+                    <div
+                      key={user.id}
+                      className="remote-cursor"
+                      style={{
+                        left: user.cursor!.x,
+                        top: user.cursor!.y,
+                        borderColor: user.color
+                      }}
+                    >
+                      <div className="cursor-label" style={{ backgroundColor: user.color }}>
+                        {user.name}
+                      </div>
+                      <div className="cursor-pointer" style={{ borderTopColor: user.color }} />
                     </div>
-                    <div className="cursor-pointer" style={{ borderTopColor: user.color }} />
-                  </div>
-                ))}
+                  ))}
+              </div>
             </div>
           </div>
         </div>

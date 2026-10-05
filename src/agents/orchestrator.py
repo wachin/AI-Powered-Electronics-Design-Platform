@@ -135,6 +135,17 @@ class AIDesignOrchestrator:
         total_cost = sum(item["total_price"] for item in bom)
         print(f"   ✅ BOM generated: {len(bom)} unique parts, ~${total_cost:.2f} estimated")
 
+        # Step 7: Export 3D glTF for visualization
+        print("\n🎨 Step 7: Exporting 3D glTF for visualization...")
+        try:
+            from src.generators.gltf_exporter import export_pcb_gltf
+            gltf_path = output_dir / f"{request.project_name}.gltf"
+            export_pcb_gltf(circuit, gltf_path, 100, 80)
+            generated_files["gltf"] = gltf_path
+            print(f"   ✅ 3D glTF exported: {gltf_path}")
+        except Exception as e:
+            print(f"   ⚠️  3D export failed: {e}")
+
         print("\n" + "=" * 60)
         print("🎉 Design synthesis complete!")
         print("=" * 60)
