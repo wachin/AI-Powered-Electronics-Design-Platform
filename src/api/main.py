@@ -16,6 +16,7 @@ from datetime import datetime
 
 from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest, DesignSummary
 from src.components.database import ComponentDatabase
+from src.collaboration.server import router as collaboration_router, handle_collaboration_websocket
 
 
 app = FastAPI(
@@ -234,6 +235,15 @@ async def get_component(mpn: str):
     if not part:
         raise HTTPException(status_code=404, detail="Component not found")
     return ComponentResultModel(**part.to_dict())
+
+
+# Include collaboration router
+app.include_router(collaboration_router)
+
+# WebSocket endpoint for real-time collaboration
+@app.websocket("/api/collaboration/ws/{room_id}/{user_id}/{user_name}")
+async def collaboration_websocket(websocket: WebSocket, room_id: str, user_id: str, user_name: str):
+    await handle_collaboration_websocket(websocket, room_id, user_id, user_name)
 
 
 if __name__ == "__main__":

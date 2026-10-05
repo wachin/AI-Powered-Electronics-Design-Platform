@@ -1,11 +1,12 @@
-import { LayoutDashboard, Search } from 'lucide-react'
+import { LayoutDashboard, Search, Users } from 'lucide-react'
 
 interface HeaderProps {
-  activeTab: 'design' | 'components'
-  onTabChange: (tab: 'design' | 'components') => void
+  activeTab: 'design' | 'components' | 'collaborate'
+  onTabChange: (tab: 'design' | 'components' | 'collaborate') => void
+  roomIdFromUrl?: string | null
 }
 
-export function Header({ activeTab, onTabChange }: HeaderProps) {
+export function Header({ activeTab, onTabChange, roomIdFromUrl }: HeaderProps) {
   return (
     <header className="header">
       <div className="header-content">
@@ -32,8 +33,28 @@ export function Header({ activeTab, onTabChange }: HeaderProps) {
             <Search className="tab-icon" />
             Components
           </button>
+          <button
+            className={`tab ${activeTab === 'collaborate' ? 'active' : ''}`}
+            onClick={() => onTabChange('collaborate')}
+          >
+            <Users className="tab-icon" />
+            Collaborate
+          </button>
         </nav>
-      </div>
-    </header>
-  )
-}
+        
+        {roomIdFromUrl && (
+          <div className="room-indicator">
+            <span className="room-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
+                <path d="M12 18V6" />
+              </svg>
+              Room: {roomIdFromUrl}
+            </span>
+          </div>
+        )}
+        </div>
+      </header>
+    )
+  }

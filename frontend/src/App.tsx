@@ -1,17 +1,29 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { apiClient as api } from './lib/api'
 import { DesignForm } from './components/DesignForm'
 import { JobStatus } from './components/JobStatus'
 import { ComponentSearch } from './components/ComponentSearch'
 import { Header } from './components/Header'
 import { useToast } from './components/Toast'
+import { CollaborationPage } from './pages/CollaborationPage'
 import type { DesignRequest, JobStatus as JobStatusType } from './types'
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'design' | 'components'>('design')
+  const [activeTab, setActiveTab] = useState<'design' | 'components' | 'collaborate'>('design')
   const [job, setJob] = useState<JobStatusType | null>(null)
   const [polling, setPolling] = useState(false)
   const toast = useToast()
+
+  // Check for room ID in URL for deep linking
+  const [roomIdFromUrl, setRoomIdFromUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const room = params.get('room')
+    if (room) {
+      setRoomIdFromUrl(room)
+    }
+  }, [])
 
   const handleDesignSubmit = async (request: DesignRequest) => {
     try {
@@ -58,9 +70,20 @@ function App() {
     setJob(null)
   }
 
+  // When roomId from URL changes, switch to collaborate tab
+  useEffect(() => {
+    if (roomIdFromUrl) {
+      setActiveTab('collaborate')
+    }
+  }, [roomIdFromUrl])
+
   return (
     <div className="app">
-      <Header activeTab={activeTab} onTabChange={setActiveTab} />
+      <Header 
+        activeTab={activeTab} 
+        onTabChange={setActiveTab}
+        roomIdFromUrl={roomIdFromUrl}
+      />
       
       <main className="main">
         {activeTab === 'design' && (
@@ -79,9 +102,12 @@ function App() {
         {activeTab === 'components' && (
           <ComponentSearch />
         )}
-      </main>
 
-      </div>
+        {activeTab === 'collaborate' && (
+          <CollaborationPage roomId={roomIdFromUrl || undefined} />
+        )}
+      </main>
+    </div>
   )
 }
 

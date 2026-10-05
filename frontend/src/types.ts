@@ -154,3 +154,29 @@ export interface ComponentSearchRequest {
   min_stock?: number
   limit?: number
 }
+
+// Collaboration types
+export interface Collaborator {
+  id: string
+  name: string
+  color: string
+  cursor?: { x: number; y: number }
+  selection?: any
+}
+
+export interface CollaborationRoom {
+  room_id: string
+  project_name: string
+  design_data: any
+  users: Collaborator[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RoomListItem {
+  room_id: string
+  project_name: string
+  user_count: number
+  created_at: string
+  updated_at: string
+}
