@@ -4,6 +4,7 @@ SPICE Simulation Integration for AI-Powered Electronics Design Platform.
 Compiles CircuitIR to SPICE netlists and runs ngspice for circuit verification.
 """
 
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -80,6 +81,35 @@ class CircuitIRToSpice:
 
     def __init__(self, circuit: CircuitIR):
         self.circuit = circuit
+        self._net_name_map: Dict[str, str] = {}
+
+    def _sanitize_net_name(self, net_name: str) -> str:
+        """Convert net name to valid SPICE node name.
+
+        SPICE node names must:
+        - Start with a letter
+        - Contain only alphanumeric characters and underscores
+        """
+        if not net_name:
+            return "NET"
+
+        # Replace invalid characters
+        sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', net_name)
+
+        # Ensure starts with letter
+        if sanitized and not sanitized[0].isalpha():
+            sanitized = 'N_' + sanitized
+
+        # Handle common voltage net names
+        sanitized = sanitized.replace('V_', 'V').replace('_V', 'V')
+
+        return sanitized
+
+    def _get_spice_net_name(self, net_name: str) -> str:
+        """Get SPICE-safe net name, caching the mapping."""
+        if net_name not in self._net_name_map:
+            self._net_name_map[net_name] = self._sanitize_net_name(net_name)
+        return self._net_name_map[net_name]
 
     def compile(self) -> str:
         """Generates a SPICE netlist from Circuit IR."""
@@ -97,17 +127,11 @@ class CircuitIRToSpice:
         # Ground reference
         lines.append(".global GND")
 
-        # Standard simulation commands
+        # Standard simulation commands - DC analysis only for now
         lines.extend([
             "",
             "* DC Operating Point Analysis",
             ".op",
-            "",
-            "* Transient Analysis (1ms)",
-            ".tran 1u 1m",
-            "",
-            "* DC Sweep for regulators",
-            ".dc VIN 0 10 0.1",
             "",
             ".end",
         ])
@@ -117,27 +141,30 @@ class CircuitIRToSpice:
     def _component_to_spice(self, ref: str, comp: Component) -> List[str]:
         lines = []
 
+        def get_net(pin) -> str:
+            return self._get_spice_net_name(pin.connected_net) if pin.connected_net else "NC"
+
         if comp.component_type == ComponentType.RESISTOR:
-            lines.append(f"R{ref} {comp.pins[0].connected_net or 'N001'} {comp.pins[1].connected_net or 'N002'} {comp.value}")
+            lines.append(f"R{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
 
         elif comp.component_type == ComponentType.CAPACITOR:
-            lines.append(f"C{ref} {comp.pins[0].connected_net or 'N001'} {comp.pins[1].connected_net or 'N002'} {comp.value}")
+            lines.append(f"C{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
 
         elif comp.component_type == ComponentType.INDUCTOR:
-            lines.append(f"L{ref} {comp.pins[0].connected_net or 'N001'} {comp.pins[1].connected_net or 'N002'} {comp.value}")
+            lines.append(f"L{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
 
         elif comp.component_type == ComponentType.DIODE:
             # Assume pin 1 = cathode, pin 2 = anode
-            cathode = comp.pins[0].connected_net if comp.pins[0].name in ('K', 'CATHODE', '1') else comp.pins[1].connected_net
-            anode = comp.pins[1].connected_net if comp.pins[1].name in ('A', 'ANODE', '2') else comp.pins[0].connected_net
+            cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
+            anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
             lines.append(f"D{ref} {anode} {cathode} 1N4148")
 
         elif comp.component_type == ComponentType.LED:
             # LED modeled as diode with forward voltage
-            cathode = comp.pins[0].connected_net if comp.pins[0].name in ('K', 'CATHODE', '1') else comp.pins[1].connected_net
-            anode = comp.pins[1].connected_net if comp.pins[1].name in ('A', 'ANODE', '2') else comp.pins[0].connected_net
+            cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
+            anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
             lines.append(f"D{ref} {anode} {cathode} DLED")
-            lines.append(".model DLED D (IS=1e-15 N=1.5 RS=10 VBR=5)")
+            lines.append(".model DLED D (IS=1e-15 N=1.5 RS=10 BV=5)")
 
         elif comp.component_type == ComponentType.REGULATOR_LDO:
             # Simplified LDO model: VIN, VOUT, GND
@@ -145,9 +172,9 @@ class CircuitIRToSpice:
             vout = comp.get_pin("VO") or comp.get_pin("VOUT") or comp.get_pin("2")
             gnd = comp.get_pin("GND") or comp.get_pin("1")
 
-            vin_net = vin.connected_net if vin else "VIN"
-            vout_net = vout.connected_net if vout else "VOUT"
-            gnd_net = gnd.connected_net if gnd else "GND"
+            vin_net = self._get_spice_net_name(vin.connected_net) if vin else "VIN"
+            vout_net = self._get_spice_net_name(vout.connected_net) if vout else "VOUT"
+            gnd_net = self._get_spice_net_name(gnd.connected_net) if gnd else "GND"
 
             # Simple voltage source model for LDO output
             lines.append(f"V{ref}_OUT {vout_net} {gnd_net} DC {self._parse_voltage(comp.value)}")
@@ -159,14 +186,41 @@ class CircuitIRToSpice:
             vdd = comp.get_pin("VDD") or comp.get_pin("VCC")
             vss = comp.get_pin("VSS") or comp.get_pin("GND")
             if vdd and vss:
-                lines.append(f"I{ref}_LOAD {vdd.connected_net} {vss.connected_net} DC 0.05")  # 50mA load
+                lines.append(f"I{ref}_LOAD {self._get_spice_net_name(vdd.connected_net)} {self._get_spice_net_name(vss.connected_net)} DC 0.05")  # 50mA load
 
         elif comp.component_type == ComponentType.VOLTAGE_SOURCE:
             # Explicit voltage source
             pos = comp.get_pin("POS") or comp.get_pin("P")
             neg = comp.get_pin("NEG") or comp.get_pin("N")
             if pos and neg:
-                lines.append(f"V{ref} {pos.connected_net} {neg.connected_net} DC {comp.value}")
+                lines.append(f"V{ref} {self._get_spice_net_name(pos.connected_net)} {self._get_spice_net_name(neg.connected_net)} DC {comp.value}")
+
+        # Passive components - use sanitized net names
+        elif comp.component_type == ComponentType.RESISTOR:
+            lines.append(f"R{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
+
+        elif comp.component_type == ComponentType.CAPACITOR:
+            lines.append(f"C{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
+
+        elif comp.component_type == ComponentType.INDUCTOR:
+            lines.append(f"L{ref} {get_net(comp.pins[0])} {get_net(comp.pins[1])} {comp.value}")
+
+        elif comp.component_type == ComponentType.DIODE:
+            # Assume pin 1 = cathode, pin 2 = anode
+            cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
+            anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
+            lines.append(f"D{ref} {anode} {cathode} 1N4148")
+
+        elif comp.component_type == ComponentType.LED:
+            # LED modeled as diode with forward voltage
+            cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
+            anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
+            lines.append(f"D{ref} {anode} {cathode} DLED")
+            lines.append(".model DLED D (IS=1e-15 N=1.5 RS=10 BV=5)")
+
+        else:
+            # Generic component - create basic model
+            lines.append(f"* Unknown component type: {comp.component_type} for {ref}")
 
         return lines
 

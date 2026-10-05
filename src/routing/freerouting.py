@@ -92,7 +92,11 @@ class FreeRoutingRunner:
         )
 
     def _export_dsn(self, pcb_path: Path, dsn_path: Path) -> RoutingResult:
-        """Export KiCad PCB to DSN format using kicad-cli."""
+        """Export KiCad PCB to DSN format using kicad-cli.
+        
+        Note: KiCad 7+ removed DSN export support. This will fail on KiCad 7+.
+        For DSN export, you need KiCad 6 or use an external converter.
+        """
         try:
             result = subprocess.run(
                 ["kicad-cli", "pcb", "export", "dsn", str(pcb_path), "-o", str(dsn_path)],
@@ -105,7 +109,11 @@ class FreeRoutingRunner:
                     success=False,
                     stdout=result.stdout,
                     stderr=result.stderr,
-                    error=f"DSN export failed: {result.stderr}"
+                    error=(
+                        f"DSN export failed: {result.stderr}\n"
+                        "Note: KiCad 7+ removed DSN export support. "
+                        "You need KiCad 6.x for DSN export, or use an external converter."
+                    )
                 )
             return RoutingResult(success=True)
         except Exception as e:

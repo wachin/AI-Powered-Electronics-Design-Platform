@@ -42,7 +42,6 @@ def test_circuit_ir_to_spice_compilation():
     netlist = compiler.compile()
 
     assert ".op" in netlist
-    assert ".tran" in netlist
     assert "R1" in netlist
     assert "C1" in netlist
     assert "VCC" in netlist
