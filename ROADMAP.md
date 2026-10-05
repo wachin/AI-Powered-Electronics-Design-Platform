@@ -474,7 +474,7 @@ Investigate:
 * [ ] machine learning for PCB routing - Not implemented
 * [ ] differential pair routing - Not implemented
 * [ ] impedance-aware routing - Not implemented
-* [ ] thermal considerations - Not implemented
+* [ ] thermal considerations - Partially implemented (smart placement separates heat sources)
 * [ ] power distribution - Not implemented
 * [ ] ground planes - Not implemented (KiCad supports, not auto-generated)
 
@@ -487,7 +487,7 @@ Determine whether we should:
 3. [ ] Develop our own routing engine - Not needed for MVP
 4. [ ] Use AI only for high-level placement/routing decisions and deterministic algorithms for final routing - Future work
 
-**Placement status:** Basic grid placement in KiCad generator; no smart placement (no collision avoidance, no thermal, no signal integrity).
+**Placement status:** Smart placement implemented with collision avoidance, thermal awareness (separates heat sources), signal integrity grouping (keeps related components close), power domain awareness, edge clearance enforcement. Supports COMPACT, THERMAL, SIGNAL_INTEGRITY, and BALANCED strategies.
 
 ---
 
@@ -887,7 +887,7 @@ Create a phased roadmap:
 - [x] **COMPLETE** - ngspice integration (src/simulation/ngspice.py)
 
 ## Phase 8 — PCB placement
-- [~] **PARTIAL** - Basic grid placement only; no smart placement
+- [x] **COMPLETE** - Smart placement with collision avoidance, thermal awareness, signal integrity (src/pcb/smart_placement.py)
 
 ## Phase 9 — PCB routing
 - [x] **COMPLETE** - FreeRouting integration (src/routing/freerouting.py)
