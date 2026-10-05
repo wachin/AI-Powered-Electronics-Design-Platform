@@ -115,15 +115,33 @@ This project is licensed under **GNU GPL-3.0**.
 
 ## Getting Started
 
-### Prerequisites
+### System Dependencies (.deb packages)
 
-1. **Python 3.10+**
-2. **KiCad 8+** (for `kicad-cli`)
-3. **ngspice** (for SPICE simulation)
-4. **Java 11+** (for FreeRouting JAR)
-5. **Node.js 18+** (for future frontend - not yet required)
+Install required system packages **once**:
 
-### Installation
+```bash
+# Update package list
+sudo apt-get update
+
+# Install required system packages
+sudo apt-get install -y \
+    python3.11 python3.11-venv python3.11-dev \
+    kicad kicad-cli \
+    ngspice ngspice-dev ngspice-doc \
+    librepcb horizon-eda \
+    kicad-footprints kicad-symbols kicad-templates \
+    default-jre  # For FreeRouting JAR
+
+# Optional packages (useful for development)
+sudo apt-get install -y \
+    sch-rnd-sim \
+    pcb-rnd \
+    default-jdk  # For FreeRouting development
+```
+
+### Python Virtual Environment (One-Time Setup)
+
+Create and configure the virtual environment **once**:
 
 ```bash
 # Clone the repository
@@ -133,49 +151,205 @@ cd AI-Powered-Electronics-Design-Platform
 # Initialize submodules (reference implementations)
 git submodule update --init --recursive
 
-# Install Python dependencies
+# Create virtual environment (ONLY ONCE)
+python3.11 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Upgrade pip and install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# Verify KiCad CLI
+# Install external submodule tools (optional, for development)
+pip install -e external/kicad-mcp-server
+pip install -e external/kicad-tools
+pip install -e external/pcbparts-mcp
+
+# Verify installations
 kicad-cli --version
-
-# Verify ngspice
 ngspice --version
-
-# Optional: Download JLCParts catalog (600k+ parts, ~400MB)
-# python -c "from src.components.database import ComponentDatabase; ComponentDatabase().download_catalog()"
-```
-
-### Quick Start
-
-```bash
-# Run full pipeline (ERC + SPICE + KiCad + FreeRouting)
-python main.py -p "Design a 5V to 3.3V LDO regulator with LED indicator"
-
-# Run without SPICE simulation (if ngspice not installed)
-python main.py -p "Design a 5V to 3.3V LDO regulator" --no-spice
-
-# Run without PCB auto-routing (if FreeRouting not installed)
-python main.py -p "Simple LED circuit" --no-routing
-
-# Run minimal (ERC + KiCad only)
-python main.py -p "Simple LED circuit" --no-spice --no-routing
-```
-
-**Output** (in `./output_design/` or custom `-o` dir):
-- `ldo_regulator.kicad_sch` - KiCad schematic
-- `ldo_regulator.kicad_pcb` - KiCad PCB layout
-- `ldo_regulator.kicad_pro` - KiCad project file
-- `design_summary.json` - Complete design report
-
-### Run Tests
-
-```bash
-PYTHONPATH=. pytest tests/ -v
-# 15 tests passing: CircuitIR, ERC, KiCad Gen, SPICE, FreeRouting, Component DB, Orchestrator
 ```
 
 ---
+
+## Daily Usage (Every Session)
+
+**You must perform these steps every time you start a new terminal session:**
+
+### 1. Activate Virtual Environment
+
+```bash
+cd AI-Powered-Electronics-Design-Platform
+source venv/bin/activate
+```
+
+You'll see `(venv)` in your prompt, indicating the virtual environment is active.
+
+### 2. Run Tests
+
+```bash
+# Run all tests
+PYTHONPATH=. pytest tests/ -v
+
+# Run specific test file
+PYTHONPATH=. pytest tests/test_ai_agent.py -v
+
+# Run with coverage
+PYTHONPATH=. pytest tests/ --cov=src --cov-report=term-missing
+```
+
+### 3. Run the Design Pipeline
+
+```bash
+# Full pipeline (ERC + SPICE + KiCad + FreeRouting)
+python main.py -p "Design a 5V to 3.3V LDO regulator with LED indicator"
+
+# Without SPICE simulation
+python main.py -p "Design a 5V to 3.3V LDO regulator" --no-spice
+
+# Without PCB auto-routing
+python main.py -p "Simple LED circuit" --no-routing
+
+# Minimal (ERC + KiCad only)
+python main.py -p "Simple LED circuit" --no-spice --no-routing
+```
+
+### 4. Deactivate Virtual Environment
+
+When you're done working:
+
+```bash
+deactivate
+```
+
+---
+
+## ⚠️ Important: One-Time vs. Repeated Steps
+
+| Step | Frequency | Commands |
+|------|-----------|----------|
+| **Install system packages** | **ONCE** | `sudo apt-get install ...` |
+| **Create virtual environment** | **ONCE** | `python3.11 -m venv venv` |
+| **Install Python dependencies** | **ONCE** | `pip install -r requirements.txt` |
+| **Activate virtual environment** | **EVERY SESSION** | `source venv/bin/activate` |
+| **Run tests** | **EVERY SESSION** | `PYTHONPATH=. pytest tests/ -v` |
+| **Run design pipeline** | **EVERY SESSION** | `python main.py -p "..."` |
+| **Deactivate venv** | **EVERY SESSION** | `deactivate` |
+
+> **⚠️ IMPORTANT:** Do NOT re-run the one-time setup steps (installing packages, creating venv, pip install) every time. They only need to be done once. The virtual environment activation and test execution must be done every time you start a new terminal session.
+
+---
+
+## Verification Commands
+
+```bash
+# Verify all tools are working
+kicad-cli --version       # Should show 9.x.x
+ngspice --version         # Should show 44.x
+python -c "import src; print('Python imports OK')"
+```
+
+---
+
+## Installed System Packages Summary
+
+| Package | Purpose |
+|---------|---------|
+| `python3.11-venv` | Virtual environment support |
+| `kicad`, `kicad-cli` | Primary EDA engine |
+| `librepcb`, `horizon-eda` | Alternative EDA engines |
+| `ngspice`, `ngspice-dev`, `ngspice-doc` | SPICE simulation CLI + docs |
+| `librepcb`, `horizon-eda` | Alternative EDA engines |
+| `kicad-footprints`, `kicad-symbols`, `kicad-templates` | KiCad libraries |
+| `sch-rnd-sim` | High-level circuit simulation |
+| `pcb-rnd` | Alternative PCB tool |
+| `default-jre` | Java runtime for FreeRouting |
+| `default-jdk` | Java development kit (for FreeRouting dev) |
+
+---
+
+## Project Structure
+
+```
+AI-Powered-Electronics-Design-Platform/
+├── main.py                          # CLI entry point
+├── requirements.txt                 # Python dependencies
+├── ROADMAP.md                       # Development roadmap
+├── AGENTS.md                        # Agent policies
+├── venv/                            # Virtual environment (created once)
+├── src/
+│   ├── core/                        # Circuit IR, ERC
+│   ├── components/                  # Component database, JLCParts
+│   ├── generators/                  # KiCad S-expression generator
+│   ├── simulation/                  # ngspice integration
+│   ├── routing/                     # FreeRouting wrapper
+│   ├── agents/                      # AI design orchestrator
+│   └── api/                         # FastAPI backend
+├── tests/                           # 63 tests (61 passing, 2 skipped)
+├── frontend/                        # React/TypeScript frontend
+└── external/                        # Git submodules (reference only)
+```
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `venv/bin/activate: No such file` | Run `python3.11 -m venv venv` first |
+| `ModuleNotFoundError` | Run `pip install -r requirements.txt` with venv active |
+| `kicad-cli: command not found` | Install `kicad` package: `sudo apt-get install kicad` |
+| `ngspice: command not found` | Install ngspice: `sudo apt-get install ngspice` |
+| `pytest: command not found` | Run `pip install pytest` in active venv |
+| `freerouting.jar not found` | Build: `cd external/freerouting && ./gradlew build -x test` |
+| Tests fail with `PermissionError` | Ensure sandbox paths are correct in `src/security/sandbox.py` |
+
+---
+
+## External Submodules (Reference Only)
+
+The `external/` directory contains Git submodules for reference only. They are **not required** for the main platform to function:
+
+```
+external/
+├── kicad-tools/           # KiCad automation utilities
+├── kicad-mcp-server/      # MCP server for KiCad
+├── freerouting/           # Autorouter source (build with ./gradlew)
+├── ngspice/               # SPICE simulator source
+├── circuit-json-to-kicad/ # Circuit JSON converter
+└── pcbparts-mcp/          # Component database tools
+```
+
+Initialize submodules if you want to explore them:
+```bash
+git submodule update --init --recursive
+```
+
+---
+
+## Running the Full Test Suite
+
+```bash
+# All tests (63 tests: 61 passing, 2 skipped)
+PYTHONPATH=. pytest tests/ -v
+
+# Quick sanity check
+PYTHONPATH=. pytest tests/test_circuit_ir.py tests/test_erc.py -v
+
+# With coverage
+PYTHONPATH=. pytest tests/ --cov=src --cov-report=term-missing
+```
+
+---
+
+## Legal Notice
+
+⚠️ **IMPORTANT:** This software is an independent open-source implementation that does NOT copy or derive from Flux.ai. See `LEGAL_NOTICE.md` and `LEGAL_DISCLAIMER.md` for details. Patent search required before commercial distribution (`research/flux-ai-patent-search.md`).
+
+---
+
+*This project is licensed under GNU GPL-3.0. See `LICENSE` file for details.*
 
 ## CLI Usage
 
