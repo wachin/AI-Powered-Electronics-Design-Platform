@@ -281,17 +281,6 @@ If you contribute:
 
 ---
 
-## Contact
-
-For legal/licensing questions, please consult a qualified attorney.
-
----
-
-*Copyright (C) 2024-2025 This Project*
-*Licensed under GNU GPL-3.0*
-
----
-
 ## Legal Notice
 
 **⚠️ IMPORTANT: READ THIS ENTIRE FILE BEFORE USING THIS SOFTWARE**
@@ -310,4 +299,4 @@ Flux.ai is a proprietary commercial product. This project:
 **READ THE FOLLOWING FILES FOR LEGAL INFORMATION:**
 - `LEGAL_NOTICE.md` - Legal considerations
 - `LEGAL_DISCLAIMER.md` - Detailed legal guidance
-- `research/flux-ai-patent-search.md` - How to search Flux.ai patents
+- `research/flux-ai-patent-search.md` - How to search Flux.ai patents (provided for due diligence reference only; this project does **not** use, implement, or derive from any Flux.ai patents)
