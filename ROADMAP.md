@@ -905,7 +905,14 @@ Create a phased roadmap:
 - [x] **COMPLETE** - Yjs CRDT real-time collaboration (src/collaboration/server.py, frontend/src/hooks/useCollaboration.ts)
 
 ## Phase 14 — Advanced AI hardware engineer
-- [ ] **PENDING** - Not started
+
+- [x] **IMPLEMENTED** - AIDesignAgent with MCP integration (src/agents/ai_agent.py, src/agents/mcp_client.py)
+  - Rule-based planning for LDO, buck, boost, LED circuits
+  - MCP client for KiCad MCP server (stdio transport, JSON-RPC 2.0)
+  - KiCadMCPTools wrapper with 40+ tool wrappers (schematic, PCB, netlist, validation, editing, parts registry)
+  - Verification loop with automatic retry/recovery
+  - Integration with existing pipeline (ERC, SPICE, FreeRouting)
+  - 14 tests covering planning, execution, verification
 
 For each phase specify:
 
