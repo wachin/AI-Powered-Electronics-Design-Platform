@@ -527,35 +527,37 @@ Investigate how feasible this workflow is.
 
 # 12. WEB APPLICATION ARCHITECTURE
 
-- [ ] **PENDING** - Not yet implemented
+- [x] **IMPLEMENTED** - React/TypeScript frontend + FastAPI backend in `frontend/` and `src/api/`
 
 Research open-source technologies for building a browser-based EDA interface.
 
 Investigate:
 
-* [ ] React
-* [ ] Vue
-* [ ] Svelte
-* [ ] TypeScript
-* [ ] WebAssembly
-* [ ] SVG
-* [ ] Canvas
-* [ ] WebGL
-* [ ] Three.js
-* [ ] Monaco Editor
-* [ ] WebSockets
-* [ ] collaborative editing
-* [ ] CRDT
-* [ ] Yjs
-* [ ] real-time synchronization
+* [x] **React** - **IMPLEMENTED** (React 18 + Vite)
+* [ ] Vue - Not used
+* [ ] Svelte - Not used
+* [x] **TypeScript** - **IMPLEMENTED** (strict mode)
+* [ ] WebAssembly - Not yet
+* [ ] SVG - Not yet (KiCad renders to SVG via CLI)
+* [ ] Canvas - Not yet
+* [ ] WebGL - Not yet
+* [ ] Three.js - Not yet (planned for 3D)
+* [ ] Monaco Editor - Not yet (planned for code editor)
+* [ ] WebSockets - Not yet (planned for real-time updates)
+* [ ] collaborative editing - Not yet
+* [ ] CRDT - Not yet
+* [ ] Yjs - **AVAILABLE** in `external/yjs/`; planned for collaboration
+* [ ] real-time synchronization - Not yet
 
 Find GitHub projects that implement browser-based schematic or PCB editors.
 
 Determine whether we should:
 
-A. Build a completely new browser EDA editor.
+A. [x] **CHOSEN** Build a custom browser frontend with KiCad as backend
 B. Use KiCad as the backend and create a web frontend.
 C. Create a hybrid architecture.
+
+**Current Architecture:** React frontend → FastAPI REST API → Python orchestrator → KiCad CLI/ngspice/FreeRouting
 
 ---
 
@@ -850,7 +852,7 @@ Identify exactly which parts can initially be delegated to existing software.
 
 # 22. PROPOSE A DEVELOPMENT ROADMAP
 
-- [~] **PARTIALLY EXECUTED** - Phases 0-11 partially complete; phases 12-14 pending
+- [~] **PARTIALLY EXECUTED** - Phases 0-12 complete; phases 13-14 pending
 
 Create a phased roadmap:
 
@@ -891,7 +893,7 @@ Create a phased roadmap:
 - [x] **COMPLETE** - Gerber export via kicad-cli; BOM generation
 
 ## Phase 12 — Web interface
-- [ ] **PENDING** - Not started
+- [x] **COMPLETE** - React/TypeScript frontend (frontend/) + FastAPI backend (src/api/main.py)
 
 ## Phase 13 — Collaboration
 - [ ] **PENDING** - Not started
