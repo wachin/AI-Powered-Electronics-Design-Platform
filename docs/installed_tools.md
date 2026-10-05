@@ -38,6 +38,26 @@
 | **pcbparts-mcp** | `external/pcbparts-mcp/` | `pip install -e .` |
 | **circuit-json-to-kicad** | `external/circuit-json-to-kicad/` | `npm install` |
 
+## ⚠️ IMPORTANT: MCP Version Compatibility Issue
+
+There is a **known incompatibility** between `kicad-mcp-server` and `pcbparts-mcp`:
+
+| Package | Required MCP Version | Result |
+|---------|---------------------|--------|
+| **kicad-mcp-server** | `mcp>=1.27` (installs 1.30.0) | Requires newer MCP |
+| **pcbparts-mcp** | `mcp==1.25.0` (exact) | Requires older MCP |
+
+**THESE ARE FUNDAMENTALLY INCOMPATIBLE** - you cannot install both simultaneously.
+
+**Choose ONE option:**
+
+| Option | Install Commands | Use Case |
+|--------|-----------------|----------|
+| **A: KiCad MCP Server** (recommended) | `pip install -e external/kicad-mcp-server`<br>`pip install -e external/kicad-tools` | KiCad MCP integration for AI agents |
+| **B: PCB Parts Database** | `pip install -e external/pcbparts-mcp`<br>`pip install -e external/kicad-tools` | PCB parts database access |
+
+**Do NOT install both** - they have irreconcilable `mcp` version requirements.
+
 ## KiCad Installation
 
 **Current Installation**: KiCad 9.0.2 installed via apt (`kicad` package)
@@ -74,10 +94,14 @@ sudo apt-get install ngspice
 # Build freerouting from source (required for PCB auto-routing)
 cd external/freerouting && ./gradlew build -x test
 
-# Install Python MCP tools
+# Install Python MCP tools (choose ONE option)
+# Option A: KiCad MCP Server (recommended for AI integration)
 pip install -e external/kicad-mcp-server
 pip install -e external/kicad-tools
-pip install -e external/pcbparts-mcp
+
+# Option B: PCB Parts Database (alternative)
+# pip install -e external/pcbparts-mcp
+# pip install -e external/kicad-tools
 
 # Install circuit-json-to-kicad converter
 cd external/circuit-json-to-kicad && npm install
@@ -104,9 +128,8 @@ pip install -r requirements.txt
 📦 **Available in external/ (need build/install):**
 - freerouting (Gradle build)
 - ngspice (autotools build)
-- kicad-mcp-server (pip install -e)
+- kicad-mcp-server (pip install -e) - **OR** pcbparts-mcp (choose ONE)
 - kicad-tools (pip install -e)
-- pcbparts-mcp (pip install -e)
 - circuit-json-to-kicad (npm install)
 
 ## Python Dependencies (for AI agent)

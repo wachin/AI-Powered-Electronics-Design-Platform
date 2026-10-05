@@ -164,13 +164,27 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Install external submodule tools (optional, for development)
-# Note: There's a known dependency conflict between kicad-mcp-server and pcbparts-mcp
-# regarding the 'mcp' package version. Install in this order:
+# IMPORTANT: There is a KNOWN INCOMPATIBILITY between kicad-mcp-server and pcbparts-mcp:
+# - kicad-mcp-server requires mcp>=1.27 (installs mcp 1.30.0)
+# - pcbparts-mcp requires mcp==1.25.0 (exact version)
+# THESE ARE FUNDAMENTALLY INCOMPATIBLE - you cannot have both installed simultaneously.
+# 
+# Choose ONE of the following options:
+# 
+# Option A: Use kicad-mcp-server (recommended for KiCad MCP integration)
 pip install -e external/kicad-mcp-server
 pip install -e external/kicad-tools
-pip install -e external/pcbparts-mcp
-# Note: pcbparts-mcp will downgrade mcp from 1.27+ to 1.25.0 which is incompatible with kicad-mcp-server
-# If you need kicad-mcp-server, install it AFTER pcbparts-mcp
+# DO NOT install pcbparts-mcp if you need kicad-mcp-server
+
+# Option B: Use pcbparts-mcp (for PCB parts database)
+# pip install -e external/pcbparts-mcp
+# pip install -e external/kicad-tools
+# # DO NOT install kicad-mcp-server if you need pcbparts-mcp
+
+# Verify installations
+kicad-cli --version
+ngspice --version
+```
 
 # Verify installations
 kicad-cli --version
