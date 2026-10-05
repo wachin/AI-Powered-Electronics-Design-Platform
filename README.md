@@ -228,8 +228,10 @@ AI-Powered-Electronics-Design-Platform/
 │   │   └── ngspice.py              # SPICE simulation integration
 │   ├── routing/
 │   │   └── freerouting.py          # FreeRouting autorouter wrapper
-│   └── agents/
-│       └── orchestrator.py         # AI design pipeline
+│   ├── agents/
+│   │   └── orchestrator.py         # AI design pipeline
+│   └── api/
+│       └── main.py                 # FastAPI REST API backend
 ├── tests/
 │   ├── test_circuit_ir.py
 │   ├── test_component_db.py
@@ -238,6 +240,19 @@ AI-Powered-Electronics-Design-Platform/
 │   ├── test_ngspice.py
 │   ├── test_freerouting.py
 │   └── test_orchestrator.py
+├── frontend/                        # React/TypeScript web frontend
+│   ├── src/
+│   │   ├── components/             # DesignForm, JobStatus, ComponentSearch, Header, Toast
+│   │   ├── lib/api.ts              # Axios API client
+│   │   ├── types.ts                # TypeScript interfaces
+│   │   ├── App.tsx                 # Main app with routing
+│   │   ├── main.tsx                # Entry point + ToastProvider
+│   │   └── index.css               # Global styles (dark theme)
+│   ├── package.json                # NPM dependencies
+│   ├── vite.config.ts              # Vite config with API proxy
+│   └── tsconfig.json               # TypeScript config
+├── api_output/                      # Runtime output (gitignored)
+│   └── <job_id>/                   # Per-job KiCad project files
 ├── external/                        # Git submodules (reference only)
 │   ├── kicad-tools/
 │   ├── kicad-mcp-server/
