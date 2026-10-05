@@ -232,28 +232,28 @@ Determine whether it can:
 
 # 5. INVESTIGATE AI/LLM ARCHITECTURES FOR ELECTRONICS
 
-- [ ] Research phase - Not yet started (current implementation uses deterministic pipeline, not LLM)
+- [~] **PARTIALLY IMPLEMENTED** - Structured output pipeline with JSON schemas, Mock LLM client, Ollama integration ready
 
 Research how an LLM can safely transform natural language into an electronic design.
 
 Investigate:
 
-* [ ] LLM agents
-* [ ] MCP
-* [ ] tool calling
-* [ ] structured output
-* [ ] JSON schemas
-* [ ] function calling
-* [ ] multi-agent architectures
-* [ ] planning agents
-* [ ] verification agents
-* [ ] RAG
-* [ ] datasheet RAG
-* [ ] vector databases
-* [ ] knowledge graphs
-* [ ] constraint solving
-* [ ] symbolic reasoning
-* [ ] circuit graph representations
+* [ ] LLM agents - Not yet
+* [ ] MCP - kicad-mcp-server in external/; not integrated
+* [ ] tool calling - Not yet
+* [x] **structured output** - **IMPLEMENTED** with JSON schemas (REQUIREMENT_SCHEMA, SPECIFICATION_SCHEMA)
+* [x] **JSON schemas** - **IMPLEMENTED** for requirements & specifications
+* [ ] function calling - Not yet
+* [ ] multi-agent architectures - Not yet
+* [ ] planning agents - Not yet
+* [ ] verification agents - Not yet
+* [ ] RAG - Not yet
+* [ ] datasheet RAG - Not yet
+* [ ] vector databases - Not yet
+* [ ] knowledge graphs - Not yet
+* [ ] constraint solving - Not yet
+* [ ] symbolic reasoning - Not yet
+* [ ] circuit graph representations - Not yet
 
 Find GitHub projects that demonstrate these techniques for electronics.
 
@@ -266,6 +266,12 @@ Natural language
 → circuit intermediate representation
 → deterministic compiler
 → KiCad
+
+**IMPLEMENTED**: This exact architecture in `src/llm/integration.py`:
+- `nl_to_circuit_spec()` implements the full pipeline
+- MockLLMClient for testing without API keys
+- OllamaLLMClient for local LLM integration
+- JSON Schema validation ensures structured output
 
 Analyze this architecture carefully.
 
