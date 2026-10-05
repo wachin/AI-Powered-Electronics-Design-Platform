@@ -7,7 +7,8 @@ Provides natural language to CircuitIR conversion using LLM providers.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
+from pathlib import Path
 from src.llm.providers import (
     LLMProvider,
     create_llm_client,
@@ -23,15 +24,82 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class ComponentSpec:
+    """Component specification with attribute access."""
+    role: str
+    mpn: str
+    manufacturer: str
+    value: str
+    package: str
+    reasoning: str = ""
+
+    def __getitem__(self, key: str) -> Any:
+        """Allow dictionary-style access for backward compatibility."""
+        return getattr(self, key)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
+
+    def get(self, key: str, default=None) -> Any:
+        return getattr(self, key, default)
+
+    def __iter__(self):
+        yield "role"
+        yield "mpn"
+        yield "manufacturer"
+        yield "value"
+        yield "package"
+        yield "reasoning"
+
+    def keys(self):
+        return ["role", "mpn", "manufacturer", "value", "package", "reasoning"]
+
+    def values(self):
+        return [self.role, self.mpn, self.manufacturer, self.value, self.package, self.reasoning]
+
+    def items(self):
+        return [
+            ("role", self.role),
+            ("mpn", self.mpn),
+            ("manufacturer", self.manufacturer),
+            ("value", self.value),
+            ("package", self.package),
+            ("reasoning", self.reasoning),
+        ]
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def keys(self):
+        return self.keys()
+
+    def __contains__(self, key):
+        return key in ["role", "mpn", "manufacturer", "value", "package", "reasoning"]
+
+
+@dataclass
 class CircuitRequirement:
     """Structured circuit requirements parsed from natural language."""
     circuit_type: str
     description: str
     input_voltage: Optional[float] = None
     output_voltage: Optional[float] = None
-    current: Optional[float] = None
+    output_current: Optional[float] = None
     features: List[str] = field(default_factory=list)
     constraints: Dict[str, Any] = field(default_factory=dict)
+
+    # Backward compatibility property
+    @property
+    def current(self) -> Optional[float]:
+        """Backward compatibility property."""
+        return self.output_current
+    
+    @current.setter
+    def current(self, value: Optional[float]) -> None:
+        self.output_current = value
 
 
 @dataclass
@@ -39,11 +107,30 @@ class CircuitSpecification:
     """Complete circuit specification ready for CircuitIR generation."""
     requirements: CircuitRequirement
     topology: str
-    components: List[Dict[str, Any]] = field(default_factory=list)
+    components: List[ComponentSpec] = field(default_factory=list)
     connections: List[Dict[str, str]] = field(default_factory=list)
     power_domains: Dict[str, Dict[str, float]] = field(default_factory=dict)
     design_notes: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Convert any dict components to ComponentSpec objects
+        converted_components = []
+        for comp in self.components:
+            if isinstance(comp, dict):
+                # Convert dict to ComponentSpec
+                converted = ComponentSpec(
+                    role=comp.get("role", ""),
+                    mpn=comp.get("mpn", ""),
+                    manufacturer=comp.get("manufacturer", ""),
+                    value=comp.get("value", ""),
+                    package=comp.get("package", ""),
+                    reasoning=comp.get("reasoning", "")
+                )
+                converted_components.append(converted)
+            else:
+                converted_components.append(comp)
+        self.components = converted_components
 
 
 class RequirementParser:
@@ -63,7 +150,7 @@ class RequirementParser:
             "description": {"type": "string"},
             "input_voltage": {"type": ["number", "null"]},
             "output_voltage": {"type": ["number", "null"]},
-            "current": {"type": ["number", "null"]},
+            "output_current": {"type": ["number", "null"]},
             "features": {"type": "array", "items": {"type": "string"}},
             "constraints": {"type": "object"},
         },
@@ -78,7 +165,7 @@ class RequirementParser:
         - circuit_type: One of [ldo_regulator, buck_converter, boost_converter, led_driver, mcu_board, generic]
         - input_voltage: Input voltage in volts (if specified)
         - output_voltage: Output voltage in volts (if specified)  
-        - current: Output current in amps (if specified)
+        - output_current: Output current in amps (if specified)
         - features: List of features mentioned (e.g., ["led_indicator", "enable_pin", "soft_start"])
         - constraints: Any additional constraints (size, cost, temperature, etc.)
         
@@ -100,7 +187,7 @@ class RequirementParser:
                         "description": {"type": "string"},
                         "input_voltage": {"type": ["number", "null"]},
                         "output_voltage": {"type": ["number", "null"]},
-                        "current": {"type": ["number", "null"]},
+                        "output_current": {"type": ["number", "null"]},
                         "features": {"type": "array", "items": {"type": "string"}},
                         "constraints": {"type": "object"},
                     },
@@ -146,7 +233,7 @@ class RequirementParser:
             description="",
             input_voltage=v_in,
             output_voltage=v_out,
-            current=current,
+            output_current=current,
         )
 
 
@@ -156,6 +243,18 @@ class CircuitSpecificationGenerator:
     def __init__(self, llm_client: LLMClient, component_db):
         self.llm = llm_client
         self.db = component_db
+
+    def _make_component(self, role: str, mpn: str, manufacturer: str, value: str, 
+                        package: str, reasoning: str = "") -> ComponentSpec:
+        """Create a ComponentSpec object."""
+        return ComponentSpec(
+            role=role,
+            mpn=mpn,
+            manufacturer=manufacturer,
+            value=value,
+            package=package,
+            reasoning=reasoning
+        )
 
     SPEC_SCHEMA = {
         "type": "object",
@@ -182,10 +281,19 @@ class CircuitSpecificationGenerator:
         "required": ["topology", "components"]
     }
 
-    async def generate(self, requirements: CircuitRequirement) -> Dict[str, Any]:
+    async def generate(self, requirements: CircuitRequirement) -> CircuitSpecification:
         """Generate detailed circuit specification from requirements."""
         # For now, use rule-based generation (LLM can be added later)
-        return self._generate_spec(requirements)
+        spec_dict = self._generate_spec(requirements)
+        return CircuitSpecification(
+            requirements=requirements,
+            topology=spec_dict["topology"],
+            components=spec_dict["components"],
+            connections=spec_dict.get("connections", []),
+            power_domains=spec_dict.get("power_domains", {}),
+            design_notes=spec_dict.get("design_notes", []),
+            warnings=spec_dict.get("warnings", []),
+        )
 
     def _generate_spec(self, req: CircuitRequirement) -> Dict[str, Any]:
         """Rule-based specification generation."""
@@ -210,10 +318,10 @@ class CircuitSpecificationGenerator:
     def _spec_ldo(self, req) -> Dict[str, Any]:
         v_in = req.input_voltage or 5.0
         v_out = req.output_voltage or 3.3
-        i_out = req.current or 0.5
+        i_out = req.output_current or 0.5
         
         # Select LDO
-        ldo = self._select_ldo(v_out, i_out)
+        ldo = self._select_ldo(req.output_voltage or 3.3, req.output_current or 0.5)
         caps = self._select_caps()
         led = self._select_led()
         res = self._select_resistor()
@@ -221,46 +329,46 @@ class CircuitSpecificationGenerator:
         return {
             "topology": "linear_ldo",
             "components": [
-                {
-                    "role": "regulator",
-                    "mpn": ldo.get("mpn", "AMS1117-3.3"),
-                    "manufacturer": ldo.get("manufacturer", "AMS"),
-                    "value": f"{v_out}V",
-                    "package": ldo.get("package", "SOT-223"),
-                    "reasoning": f"LDO regulator {v_out}V {i_out}A"
-                },
-                {
-                    "role": "input_capacitor",
-                    "mpn": caps[0].get("mpn", "C-10uF-0805"),
-                    "manufacturer": caps[0].get("manufacturer", "Yageo"),
-                    "value": caps[0].get("value", "10uF"),
-                    "package": caps[0].get("package", "0805"),
-                    "reasoning": "Input decoupling capacitor"
-                },
-                {
-                    "role": "output_capacitor",
-                    "mpn": caps[1].get("mpn", "C-22uF-0805"),
-                    "manufacturer": caps[1].get("manufacturer", "Yageo"),
-                    "value": caps[1].get("value", "22uF"),
-                    "package": caps[1].get("package", "0805"),
-                    "reasoning": "Output stability capacitor"
-                },
-                {
-                    "role": "led_indicator",
-                    "mpn": led.get("mpn", "LED-GREEN-0805"),
-                    "manufacturer": led.get("manufacturer", "Lite-On"),
-                    "value": "Green",
-                    "package": "0805",
-                    "reasoning": "Power-on indicator"
-                },
-                {
-                    "role": "current_limit_resistor",
-                    "mpn": res.get("mpn", "R-330-0805"),
-                    "manufacturer": res.get("manufacturer", "Yageo"),
-                    "value": "330",
-                    "package": "0805",
-                    "reasoning": "LED current limiting resistor"
-                }
+                self._make_component(
+                    role="regulator",
+                    mpn=ldo.get("mpn", "AMS1117-3.3"),
+                    manufacturer=ldo.get("manufacturer", "AMS"),
+                    value=f"{req.output_voltage or 3.3}V",
+                    package=ldo.get("package", "SOT-223"),
+                    reasoning=f"LDO regulator {req.output_voltage or 3.3}V {req.output_current or 0.5}A"
+                ),
+                self._make_component(
+                    role="input_capacitor",
+                    mpn=caps[0].get("mpn", "CC0805KRX7R9BB106"),
+                    manufacturer=caps[0].get("manufacturer", "Yageo"),
+                    value=caps[0].get("value", "10uF"),
+                    package=caps[0].get("package", "0805"),
+                    reasoning="Input decoupling capacitor"
+                ),
+                self._make_component(
+                    role="output_capacitor",
+                    mpn=caps[1].get("mpn", "CC0805KRX5R7BB226"),
+                    manufacturer=caps[1].get("manufacturer", "Yageo"),
+                    value=caps[1].get("value", "22uF"),
+                    package=caps[1].get("package", "0805"),
+                    reasoning="Output stability capacitor"
+                ),
+                self._make_component(
+                    role="led_indicator",
+                    mpn=led.get("mpn", "LTST-C190KGKT"),
+                    manufacturer=led.get("manufacturer", "Lite-On"),
+                    value=led.get("value", "Green"),
+                    package=led.get("package", "0805"),
+                    reasoning="Power-on indicator"
+                ),
+                self._make_component(
+                    role="current_limit_resistor",
+                    mpn=res.get("mpn", "RC0805FR-0710KL"),
+                    manufacturer=res.get("manufacturer", "Yageo"),
+                    value=res.get("value", "330"),
+                    package=res.get("package", "0805"),
+                    reasoning="LED current limiting resistor"
+                ),
             ],
             "design_notes": [
                 f"LDO dropout: {5.0 - 3.3}V",
@@ -406,13 +514,26 @@ class CircuitSpecificationGenerator:
 class NLToCircuitPipeline:
     """End-to-end pipeline: Natural Language -> CircuitIR -> KiCad."""
     
-    def __init__(self, llm_provider: str = "mock", component_db=None):
-        self.llm_client = create_llm_client("mock")  # Use mock for now
-        self.parser = RequirementParser(self.llm_client)
-        self.spec_generator = CircuitSpecificationGenerator(self.llm_client, None)
-        self.orchestrator = None  # Will be set externally
+    def __init__(
+        self,
+        llm_client: Optional[Any] = None,
+        component_db: Optional[Any] = None,
+    ):
+        """Initialize pipeline with optional LLM client and component database.
         
-    async def nl_to_circuit_spec(self, prompt: str) -> dict:
+        Args:
+            llm_client: LLM client instance. If None, uses mock client.
+            component_db: Optional component database for part selection.
+        """
+        if llm_client is None:
+            llm_client = create_llm_client("mock")
+        
+        self.llm_client = llm_client
+        self.parser = RequirementParser(llm_client)
+        self.spec_generator = CircuitSpecificationGenerator(llm_client, None)
+        self.orchestrator = None
+    
+    async def nl_to_circuit_spec(self, prompt: str) -> CircuitSpecification:
         """Process natural language prompt through full pipeline to circuit spec."""
         # Step 1: Parse requirements
         requirements = await self.parser.parse(prompt)
@@ -421,16 +542,26 @@ class NLToCircuitPipeline:
         spec = await self.spec_generator.generate(requirements)
         
         # Step 3: Generate CircuitIR (simplified - would use spec to build CircuitIR)
-        circuit_ir = self._spec_to_circuit_ir({})
+        self._spec_to_circuit_ir(requirements)
         
-        return {
-            "requirements": requirements,
-            "specification": self._spec_to_dict({}),
-            "circuit_ir": {}
-        }
+        return spec
+    
+    async def process(
+        self,
+        prompt: str,
+        project_name: str = "design",
+        output_dir: Optional[Path] = None,
+    ) -> dict:
+        """Process natural language prompt through full pipeline.
         
-    async def process(self, prompt: str, project_name: str = "design") -> dict:
-        """Process natural language prompt through full pipeline."""
+        Args:
+            prompt: Natural language description of the circuit
+            project_name: Name for the output project
+            output_dir: Optional output directory for generated files
+            
+        Returns:
+            Dictionary with requirements, specification, circuit_ir, and generated files
+        """
         # Step 1: Parse requirements
         requirements = await self.parser.parse(prompt)
         
@@ -438,41 +569,76 @@ class NLToCircuitPipeline:
         spec = await self.spec_generator.generate(requirements)
         
         # Step 3: Generate CircuitIR (simplified - would use spec to build CircuitIR)
-        circuit_ir = self._spec_to_circuit_ir({})
+        circuit_ir = self._spec_to_circuit_ir(requirements)
         
         # Step 4: Generate KiCad files (via orchestrator)
+        output_dir = output_dir or Path("output") / "generated"
         if self.orchestrator:
             from src.agents.orchestrator import DesignRequest
-            request = DesignRequest(prompt="", project_name="generated")
-            request.prompt = "Generated from NL"
-            summary = self.orchestrator.process_request(request, output_dir)
+            request = DesignRequest(
+                prompt=prompt,
+                project_name=project_name,
+                run_spice=True,
+                run_routing=True
+            )
+            summary = self.orchestrator.process_request(
+                DesignRequest(
+                    prompt=prompt,
+                    project_name=project_name,
+                    run_spice=True,
+                    run_routing=True
+                ), output_dir)
+            
+            generated_files = {
+                "sch": summary.generated_files.get("sch"),
+                "pcb": summary.generated_files.get("pcb"),
+                "pro": summary.generated_files.get("pro"),
+                "gltf": summary.generated_files.get("gltf"),
+            }
             
             return {
                 "requirements": requirements,
-                "specification": spec,
-                "output_files": summary.generated_files,
-                "bom": summary.bom
+                "specification": self._spec_to_dict({}),
+                "circuit_ir": circuit_ir,
+                "output_files": generated_files,
+                "bom": summary.bom,
             }
         
         return {
             "requirements": requirements,
-            "specification": spec,
+            "specification": self._spec_to_dict({}),
+            "circuit_ir": {},
         }
-
-    def _spec_to_circuit_ir(self, spec) -> 'CircuitIR':
-        """Convert specification to CircuitIR (simplified)."""
+    
+    def _spec_to_dict(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert specification to dictionary for serialization."""
+        return spec
+    
+    def _spec_to_circuit_ir(self, requirements: CircuitRequirement) -> 'CircuitIR':
+        """Convert requirements to CircuitIR (simplified)."""
         from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
         circuit = CircuitIR(name="Generated Circuit")
-        # Would build full CircuitIR from spec - simplified for now
+        # Would build full CircuitIR from requirements - simplified for now
         return circuit
 
-    def set_orchestrator(self, orchestrator):
-        self.orchestrator = orchestrator
 
-
-def create_nl_pipeline(llm_provider: str = "mock") -> NLToCircuitPipeline:
-    """Factory function to create NL pipeline."""
-    return NLToCircuitPipeline(llm_provider=llm_provider)
+def create_nl_pipeline(llm_provider: Union[LLMProvider, str] = "mock", component_db=None) -> NLToCircuitPipeline:
+    """Factory function to create NL pipeline.
+    
+    Args:
+        llm_provider: LLM provider string or LLMProvider enum
+        component_db: Optional component database for part selection
+    """
+    if isinstance(llm_provider, str):
+        try:
+            provider = LLMProvider(llm_provider.lower())
+        except ValueError:
+            raise ValueError(f"Unknown provider: {llm_provider}")
+        llm_client = create_llm_client(provider)
+    else:
+        llm_client = create_llm_client(llm_provider)
+    
+    return NLToCircuitPipeline(llm_client=llm_client, component_db=None)
 
 
 # Module-level schema exports for testing

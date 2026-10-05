@@ -384,17 +384,21 @@ class MockLLMClient(LLMClient):
     def set_response(self, prompt_key: str, response: Dict[str, Any]):
         self.responses[prompt_key] = response
 
+    def is_available(self) -> bool:
+        """Check if the mock client is available (always True for mock)."""
+        return True
+
     async def health_check(self) -> bool:
         return True
 
-    async def complete(
+    def complete(
         self,
         messages: List[LLMMessage],
         temperature: float = 0.1,
         max_tokens: int = 4096,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
-        # Use last user message as key
+        """Synchronous completion for testing."""
         key = messages[-1].content if messages else "default"
         response = self.responses.get(key, {
             "circuit_type": "ldo_regulator",
@@ -414,9 +418,10 @@ class MockLLMClient(LLMClient):
         key = messages[-1].content if messages else "default"
         return self.responses.get(key, {
             "circuit_type": "ldo_regulator",
+            "description": "Mock LDO regulator circuit",
             "input_voltage": 5.0,
             "output_voltage": 3.3,
-            "current": 0.5,
+            "output_current": 0.5,
         })
 
     async def health_check(self) -> bool:

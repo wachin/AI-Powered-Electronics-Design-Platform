@@ -13,10 +13,6 @@ from src.llm.integration import (
     NLToCircuitPipeline,
     create_nl_pipeline,
 )
-from src.llm.integration import (
-    REQUIREMENT_SCHEMA,
-    SPECIFICATION_SCHEMA,
-)
 from src.llm.providers import MockLLMClient
 
 
@@ -174,12 +170,12 @@ class TestCircuitSpecificationGenerator:
         
         spec = await generator.generate(req)
         
-        assert spec["topology"] == "linear_ldo"
-        assert len(spec["components"]) >= 4
-        assert any(c["role"] == "regulator" for c in spec["components"])
-        assert any(c["role"] == "input_capacitor" for c in spec["components"])
-        assert any(c["role"] == "output_capacitor" for c in spec["components"])
-        assert any(c["role"] == "led_indicator" for c in spec["components"])
+        assert spec.topology == "linear_ldo"
+        assert len(spec.components) >= 4
+        assert any(c.role == "regulator" for c in spec.components)
+        assert any(c.role == "input_capacitor" for c in spec.components)
+        assert any(c.role == "output_capacitor" for c in spec.components)
+        assert any(c.role == "led_indicator" for c in spec.components)
 
     @pytest.mark.asyncio
     async def test_buck_specification(self):
@@ -247,10 +243,10 @@ class TestCircuitSpecificationGenerator:
         
         spec = await generator.generate(req)
         
-        assert spec["topology"] == "buck_async"
-        assert len(spec["components"]) >= 5
+        assert spec.topology == "buck_async"
+        assert len(spec.components) >= 5
         
-        roles = {c["role"] for c in spec["components"]}
+        roles = {c.role for c in spec.components}
         assert "controller" in roles
         assert "inductor" in roles
         assert "input_capacitor" in roles
@@ -274,8 +270,8 @@ class TestCircuitSpecificationGenerator:
         
         spec = await generator.generate(req)
         
-        assert spec["topology"] == "boost"
-        roles = {c["role"] for c in spec["components"]}
+        assert spec.topology == "boost"
+        roles = {c.role for c in spec.components}
         assert "controller" in roles
         assert "inductor" in roles
 
@@ -295,8 +291,8 @@ class TestCircuitSpecificationGenerator:
         
         spec = await generator.generate(req)
         
-        assert spec["topology"] == "series_resistor"
-        roles = {c["role"] for c in spec["components"]}
+        assert spec.topology == "series_resistor"
+        roles = {c.role for c in spec.components}
         assert "led" in roles
         assert "current_limit_resistor" in roles
 
