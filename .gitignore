@@ -46,6 +46,7 @@ exports/
 
 # === Generated design output ===
 generated_design/
+api_output/
 design_result.json
 
 # === IDE / Editor ===
