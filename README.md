@@ -197,6 +197,25 @@ ngspice --version
 
 **You must perform these steps every time you start a new terminal session:**
 
+### ⚡ Quick Reference
+
+```bash
+# Activate environment (every session)
+source venv/bin/activate
+
+# Run tests
+PYTHONPATH=. pytest tests/ -v
+
+# Run design pipeline
+python main.py -p "Design a 5V to 3.3V LDO regulator with LED indicator"
+
+# Run without SPICE/routing for quick testing
+python main.py -p "Simple LED circuit" --no-spice --no-routing
+
+# Deactivate when done
+deactivate
+```
+
 ### 1. Activate Virtual Environment
 
 ```bash
