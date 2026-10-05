@@ -125,7 +125,7 @@ sudo apt-get update
 
 # Install required system packages
 sudo apt-get install -y \
-    python3.11 python3.11-venv python3.11-dev \
+    python3 python3-venv python3-dev \
     kicad kicad-cli \
     ngspice ngspice-dev ngspice-doc \
     librepcb horizon-eda \
@@ -152,7 +152,9 @@ cd AI-Powered-Electronics-Design-Platform
 git submodule update --init --recursive
 
 # Create virtual environment (ONLY ONCE)
-python3.11 -m venv venv
+# Note: Use `python3` (not python3.11) - the system's default python3
+# The python3-venv package will install the appropriate venv module
+python3 -m venv venv
 
 # Activate virtual environment
 source venv/bin/activate
@@ -162,9 +164,13 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Install external submodule tools (optional, for development)
+# Note: There's a known dependency conflict between kicad-mcp-server and pcbparts-mcp
+# regarding the 'mcp' package version. Install in this order:
 pip install -e external/kicad-mcp-server
 pip install -e external/kicad-tools
 pip install -e external/pcbparts-mcp
+# Note: pcbparts-mcp will downgrade mcp from 1.27+ to 1.25.0 which is incompatible with kicad-mcp-server
+# If you need kicad-mcp-server, install it AFTER pcbparts-mcp
 
 # Verify installations
 kicad-cli --version
@@ -230,7 +236,7 @@ deactivate
 | Step | Frequency | Commands |
 |------|-----------|----------|
 | **Install system packages** | **ONCE** | `sudo apt-get install ...` |
-| **Create virtual environment** | **ONCE** | `python3.11 -m venv venv` |
+| **Create virtual environment** | **ONCE** | `python3 -m venv venv` |
 | **Install Python dependencies** | **ONCE** | `pip install -r requirements.txt` |
 | **Activate virtual environment** | **EVERY SESSION** | `source venv/bin/activate` |
 | **Run tests** | **EVERY SESSION** | `PYTHONPATH=. pytest tests/ -v` |
@@ -256,12 +262,12 @@ python -c "import src; print('Python imports OK')"
 
 | Package | Purpose |
 |---------|---------|
-| `python3.11-venv` | Virtual environment support |
+| `python3-venv` | Virtual environment support (installs python3.13-venv) |
 | `kicad`, `kicad-cli` | Primary EDA engine |
 | `librepcb`, `horizon-eda` | Alternative EDA engines |
 | `ngspice`, `ngspice-dev`, `ngspice-doc` | SPICE simulation CLI + docs |
 | `librepcb`, `horizon-eda` | Alternative EDA engines |
-| `kicad-footprints`, `kicad-symbols`, `kicad-templates` | KiCad libraries |
+| `kicad-footprints`, `kicad-symbols`, `kicad-templates` | KiCad libraries (via kicad-libraries) |
 | `sch-rnd-sim` | High-level circuit simulation |
 | `pcb-rnd` | Alternative PCB tool |
 | `default-jre` | Java runtime for FreeRouting |
