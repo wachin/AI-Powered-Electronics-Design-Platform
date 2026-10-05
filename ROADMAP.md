@@ -569,22 +569,36 @@ C. Create a hybrid architecture.
 
 # 13. 3D PCB VISUALIZATION
 
-- [ ] **PENDING** - Not yet implemented
+- [x] **IMPLEMENTED** - Three.js-based 3D PCB viewer (frontend/src/components/PCB3DViewer.tsx) + glTF exporter (src/generators/gltf_exporter.py)
 
 Investigate open-source projects for:
 
-* [ ] PCB 3D visualization
-* [ ] STEP
-* [ ] VRML
-* [ ] glTF
-* [ ] WebGL
-* [ ] Three.js
-* [ ] KiCad 3D models
+* [x] **PCB 3D visualization** - **IMPLEMENTED** (Three.js + OrbitControls)
+* [x] **glTF** - **IMPLEMENTED** (glTF 2.0 export + Three.js GLTFLoader)
+* [x] **WebGL** - **IMPLEMENTED** (Three.js WebGLRenderer)
+* [x] **Three.js** - **IMPLEMENTED** (r158+)
+* [ ] STEP - Not implemented
+* [ ] VRML - Not implemented
+* [ ] KiCad 3D models - Partial (placeholder components)
 
 Determine how the browser could show:
 
-* [ ] PCB
-* [ ] components
+* [x] **PCB** - Board outline, layers, copper pours
+* [x] **components** - ICs, passives, connectors as 3D models
+* [x] **copper** - Traces, pours, vias as 3D geometry
+* [x] **layers** - Multi-layer stackup visualization
+* [x] **traces** - 3D trace routing
+* [ ] 3D components - Using KiCad 3D models (planned)
+* [ ] board enclosure - Mechanical enclosure (planned)
+
+**Features implemented:**
+- OrbitControls for rotate/pan/zoom
+- Realistic lighting (ambient + directional with shadows)
+- glTF 2.0 export from CircuitIR
+- Split-screen 3D + 2D collaborative canvas
+- Component 3D models (ICs, passives, connectors, crystals)
+- Board stackup visualization (FR4, copper, soldermask, silkscreen)
+- Lighting with PBR materials (FR4, copper, plastic, gold, silkscreen)
 * [ ] copper
 * [ ] layers
 * [ ] traces
