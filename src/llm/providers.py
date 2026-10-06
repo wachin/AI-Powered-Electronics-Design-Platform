@@ -393,13 +393,17 @@ class MockLLMClient(LLMClient):
 
     def complete(
         self,
-        messages: List[LLMMessage],
+        messages: Union[List[LLMMessage], str],
         temperature: float = 0.1,
         max_tokens: int = 4096,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
         """Synchronous completion for testing."""
-        key = messages[-1].content if messages else "default"
+        # Handle both string and list of messages
+        if isinstance(messages, str):
+            key = messages
+        else:
+            key = messages[-1].content if messages else "default"
         response = self.responses.get(key, {
             "circuit_type": "ldo_regulator",
             "description": "Mock response",
