@@ -27,7 +27,7 @@ class TestMockLLMClient:
         client = MockLLMClient()
         assert client.is_available() is True
 
-@pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_mock_ldo_parsing(self):
         """Test LDO regulator parsing from natural language."""
         client = MockLLMClient()
@@ -39,17 +39,17 @@ class TestMockLLMClient:
             "output_current": 0.5,
             "features": ["led_indicator"],
         }
-        
+
         prompt = "Design a 5V to 3.3V LDO regulator with LED indicator"
         result = await client.complete(prompt)
         data = json.loads(result.content)
-        
+
         assert data["circuit_type"] == "ldo_regulator"
         assert data["input_voltage"] == 5.0
         assert data["output_voltage"] == 3.3
         assert "led" in str(data.get("features", [])).lower() or "led_indicator" in str(data.get("features", []))
 
-@pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_mock_buck_parsing(self):
         """Test buck converter parsing."""
         client = MockLLMClient()
@@ -60,17 +60,17 @@ class TestMockLLMClient:
             "output_voltage": 5.0,
             "output_current": 3.0,
         }
-        
+
         prompt = "Create a 12V to 5V buck converter 3A output"
         result = await client.complete(prompt)
         data = json.loads(result.content)
-        
+
         assert data["circuit_type"] == "buck_converter"
         assert data["input_voltage"] == 12.0
         assert data["output_voltage"] == 5.0
         assert data["output_current"] == 3.0
 
-@pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_mock_boost_parsing(self):
         """Test boost converter parsing."""
         client = MockLLMClient()
@@ -80,16 +80,16 @@ class TestMockLLMClient:
             "input_voltage": 3.3,
             "output_voltage": 5.0,
         }
-        
+
         prompt = "Design a 3.3V to 5V boost converter"
         result = await client.complete(prompt)
         data = json.loads(result.content)
-        
+
         assert data["circuit_type"] == "boost_converter"
         assert data["input_voltage"] == 3.3
         assert data["output_voltage"] == 5.0
 
-@pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_mock_led_parsing(self):
         """Test LED driver parsing."""
         client = MockLLMClient()
@@ -97,11 +97,11 @@ class TestMockLLMClient:
             "circuit_type": "led_driver",
             "description": "Simple LED circuit with current limiting resistor",
         }
-        
+
         prompt = "Simple LED circuit with current limiting resistor"
         result = await client.complete(prompt)
         data = json.loads(result.content)
-        
+
         assert data["circuit_type"] == "led_driver"
 
 
@@ -114,9 +114,9 @@ class TestRequirementParser:
         # Use the actual parser
         llm_client = create_llm_client(LLMProvider.MOCK)
         parser = RequirementParser(llm_client)
-        
+
         req = await parser.parse("Design a 5V to 3.3V LDO regulator with LED")
-        
+
         assert isinstance(req, CircuitRequirement)
         assert req.circuit_type == "ldo_regulator"
         assert req.input_voltage == 5.0
@@ -131,7 +131,7 @@ class TestCircuitSpecificationGenerator:
         """Test generate_specification function."""
         # Create a mock LLM client that returns appropriate responses
         client = MockLLMClient()
-        
+
         # Set up mock responses for the LDO design
         client.responses["default"] = {
             "topology": "linear_ldo",
@@ -187,8 +187,11 @@ class TestCircuitSpecificationGenerator:
                 "Verify dropout voltage at max current"
             ]
         }
-        
-        generator = CircuitSpecificationGenerator(client, db=None)
+
+        client = MockLLMClient()
+        db = None
+        generator = CircuitSpecificationGenerator(client, db)
+
         req = CircuitRequirement(
             circuit_type="ldo_regulator",
             description="5V to 3.3V LDO",
@@ -197,19 +200,15 @@ class TestCircuitSpecificationGenerator:
             output_current=0.5,
             features=["led_indicator"]
         )
-        
+
         spec = await generator.generate(req)
-        
+
         assert spec.topology == "linear_ldo"
         assert len(spec.components) >= 4
-        
+
         reg = next((c for c in spec.components if c.role == "regulator"), None)
         assert reg is not None
         assert reg.mpn == "AMS1117-3.3"
-
-
-class TestCircuitSpecificationGenerator:
-    """Tests for CircuitSpecificationGenerator."""
 
     @pytest.mark.asyncio
     async def test_buck_specification(self):
@@ -217,7 +216,7 @@ class TestCircuitSpecificationGenerator:
         client = MockLLMClient()
         db = None
         generator = CircuitSpecificationGenerator(client, db)
-        
+
         req = CircuitRequirement(
             circuit_type="buck_converter",
             description="12V to 5V buck",
@@ -225,12 +224,12 @@ class TestCircuitSpecificationGenerator:
             output_voltage=5.0,
             output_current=3.0
         )
-        
+
         spec = await generator.generate(req)
-        
+
         assert spec.topology == "buck_async"
         assert len(spec.components) >= 5
-        
+
         roles = {c.role for c in spec.components}
         assert "controller" in roles
         assert "inductor" in roles
@@ -244,7 +243,7 @@ class TestCircuitSpecificationGenerator:
         client = MockLLMClient()
         db = None
         generator = CircuitSpecificationGenerator(client, db)
-        
+
         req = CircuitRequirement(
             circuit_type="boost_converter",
             description="3.3V to 5V boost",
@@ -252,9 +251,9 @@ class TestCircuitSpecificationGenerator:
             output_voltage=5.0,
             output_current=1.0
         )
-        
+
         spec = await generator.generate(req)
-        
+
         assert spec.topology == "boost"
         roles = {c.role for c in spec.components}
         assert "controller" in roles
@@ -266,16 +265,16 @@ class TestCircuitSpecificationGenerator:
         client = MockLLMClient()
         db = None
         generator = CircuitSpecificationGenerator(client, db)
-        
+
         req = CircuitRequirement(
             circuit_type="led_driver",
             description="Simple LED circuit",
             input_voltage=5.0,
             output_current=0.02
         )
-        
+
         spec = await generator.generate(req)
-        
+
         assert spec.topology == "series_resistor"
         roles = {c.role for c in spec.components}
         assert "led" in roles
@@ -290,7 +289,7 @@ class TestNLToCircuitPipeline:
         """Test end-to-end natural language to circuit specification."""
         # This tests the full pipeline with mock LLM
         client = MockLLMClient()
-        
+
         # Set up mock responses for the full pipeline
         client.responses["default"] = {
             "circuit_type": "ldo_regulator",
@@ -300,13 +299,13 @@ class TestNLToCircuitPipeline:
             "output_current": 0.5,
             "features": ["led_indicator"],
         }
-        
+
         pipeline = create_nl_pipeline(LLMProvider.MOCK)
-        
+
         spec = await pipeline.nl_to_circuit_spec(
             "Design a 5V to 3.3V LDO regulator with LED indicator"
         )
-        
+
         assert spec.requirements.circuit_type == "ldo_regulator"
         assert spec.requirements.input_voltage == 5.0
         assert spec.requirements.output_voltage == 3.3

@@ -42,14 +42,13 @@ class LLMClient(ABC):
     """Abstract base class for LLM clients."""
 
     @abstractmethod
-    async def complete(
+    async def complete
         self,
         messages: List[LLMMessage],
         temperature: float = 0.1,
         max_tokens: int = 4096,
         response_format: Optional[Dict[str, Any]] = None,
-    ) -> LLMResponse:
-        """Generate completion from messages."""
+    """Generate completion from messages."""
         pass
 
     @abstractmethod
@@ -96,7 +95,7 @@ class OllamaClient(LLMClient):
             logger.warning(f"Ollama health check failed: {e}")
             return False
 
-    async def complete(
+    async def complete
         self,
         messages: List[LLMMessage],
         temperature: float = 0.1,
@@ -199,7 +198,7 @@ class OpenAIClient(LLMClient):
             logger.warning(f"OpenAI health check failed: {e}")
             return False
 
-    async def complete(
+    async def complete
         self,
         messages: List[LLMMessage],
         temperature: float = 0.1,
@@ -300,7 +299,7 @@ class AnthropicClient(LLMClient):
         # Anthropic doesn't have a simple health endpoint
         return True
 
-    async def complete(
+    async def complete
         self,
         messages: List[LLMMessage],
         temperature: float = 0.1,
@@ -391,7 +390,7 @@ class MockLLMClient(LLMClient):
     async def health_check(self) -> bool:
         return True
 
-    def complete(
+    async def complete(
         self,
         messages: Union[List[LLMMessage], str],
         temperature: float = 0.1,
