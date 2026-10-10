@@ -533,6 +533,10 @@ class NLToCircuitPipeline:
         self.spec_generator = CircuitSpecificationGenerator(llm_client, None)
         self.orchestrator = None
     
+    def set_orchestrator(self, orchestrator: Any) -> None:
+        """Set the orchestrator for this pipeline."""
+        self.orchestrator = orchestrator
+    
     async def nl_to_circuit_spec(self, prompt: str) -> CircuitSpecification:
         """Process natural language prompt through full pipeline to circuit spec."""
         # Step 1: Parse requirements
@@ -571,43 +575,10 @@ class NLToCircuitPipeline:
         # Step 3: Generate CircuitIR (simplified - would use spec to build CircuitIR)
         circuit_ir = self._spec_to_circuit_ir(requirements)
         
-        # Step 4: Generate KiCad files (via orchestrator)
-        output_dir = output_dir or Path("output") / "generated"
-        if self.orchestrator:
-            from src.agents.orchestrator import DesignRequest
-            request = DesignRequest(
-                prompt=prompt,
-                project_name=project_name,
-                run_spice=True,
-                run_routing=True
-            )
-            summary = self.orchestrator.process_request(
-                DesignRequest(
-                    prompt=prompt,
-                    project_name=project_name,
-                    run_spice=True,
-                    run_routing=True
-                ), output_dir)
-            
-            generated_files = {
-                "sch": summary.generated_files.get("sch"),
-                "pcb": summary.generated_files.get("pcb"),
-                "pro": summary.generated_files.get("pro"),
-                "gltf": summary.generated_files.get("gltf"),
-            }
-            
-            return {
-                "requirements": requirements,
-                "specification": self._spec_to_dict({}),
-                "circuit_ir": circuit_ir,
-                "output_files": generated_files,
-                "bom": summary.bom,
-            }
-        
         return {
             "requirements": requirements,
-            "specification": self._spec_to_dict({}),
-            "circuit_ir": {},
+            "specification": spec,
+            "circuit_ir": circuit_ir,
         }
     
     def _spec_to_dict(self, spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -615,10 +586,147 @@ class NLToCircuitPipeline:
         return spec
     
     def _spec_to_circuit_ir(self, requirements: CircuitRequirement) -> 'CircuitIR':
-        """Convert requirements to CircuitIR (simplified)."""
+        """Convert requirements to CircuitIR based on circuit type."""
         from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
-        circuit = CircuitIR(name="Generated Circuit")
-        # Would build full CircuitIR from requirements - simplified for now
+        from src.components.database import ComponentDatabase
+        
+        db = ComponentDatabase()
+        circuit = CircuitIR(name=f"Generated {requirements.circuit_type.replace('_', ' ').title()}")
+        
+        # LDO Regulator Pattern
+        if requirements.circuit_type == "ldo_regulator":
+            # Fetch parts from DB
+            ldo_spec = db.get_by_mpn("AMS1117-3.3") or db.search(category="regulator_ldo")[0]
+            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
+            c_out_spec = db.get_by_mpn("C-22uF-0805") or db.search(category="capacitor")[0]
+            res_spec = db.get_by_mpn("R-330-0805") or db.search(category="resistor")[0]
+            led_spec = db.get_by_mpn("LED-GREEN-0805") or db.search(category="led")[0]
+
+            # LDO Regulator U1
+            u1 = Component(
+                ref="U1",
+                value=ldo_spec.value,
+                component_type=ComponentType.REGULATOR_LDO,
+                footprint=ldo_spec.footprint,
+                symbol=ldo_spec.symbol,
+                mpn=ldo_spec.mpn,
+                manufacturer=ldo_spec.manufacturer,
+                description=ldo_spec.description,
+            )
+            u1.add_pin("1", "GND", PinType.POWER_IN)
+            u1.add_pin("2", "VOUT", PinType.POWER_OUT)
+            u1.add_pin("3", "VIN", PinType.POWER_IN)
+            circuit.add_component(u1)
+
+            # Input Capacitor C1
+            c1 = Component(
+                ref="C1",
+                value=c_in_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_in_spec.footprint,
+                symbol=c_in_spec.symbol,
+                mpn=c_in_spec.mpn,
+            )
+            c1.add_pin("1", "1", PinType.PASSIVE)
+            c1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c1)
+
+            # Output Capacitor C2
+            c2 = Component(
+                ref="C2",
+                value=c_out_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_out_spec.footprint,
+                symbol=c_out_spec.symbol,
+                mpn=c_out_spec.mpn,
+            )
+            c2.add_pin("1", "1", PinType.PASSIVE)
+            c2.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c2)
+
+            # Indicator LED D1
+            d1 = Component(
+                ref="D1",
+                value=led_spec.value,
+                component_type=ComponentType.LED,
+                footprint=led_spec.footprint,
+                symbol=led_spec.symbol,
+                mpn=led_spec.mpn,
+            )
+            d1.add_pin("1", "K", PinType.PASSIVE)
+            d1.add_pin("2", "A", PinType.PASSIVE)
+            circuit.add_component(d1)
+
+            # Current Limiting Resistor R1
+            r1 = Component(
+                ref="R1",
+                value=res_spec.value,
+                component_type=ComponentType.RESISTOR,
+                footprint=res_spec.footprint,
+                symbol=res_spec.symbol,
+                mpn=res_spec.mpn,
+            )
+            r1.add_pin("1", "1", PinType.PASSIVE)
+            r1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(r1)
+
+            # Nets
+            circuit.connect("U1", "3", "VIN")      # VIN
+            circuit.connect("U1", "2", "VOUT")     # VOUT
+            circuit.connect("U1", "1", "GND")      # GND
+            circuit.connect("C1", "1", "VIN")
+            circuit.connect("C1", "2", "GND")
+            circuit.connect("C2", "1", "VOUT")
+            circuit.connect("C2", "2", "GND")
+            circuit.connect("R1", "1", "VOUT")
+            circuit.connect("R1", "2", "D1_A")
+            circuit.connect("D1", "A", "D1_A")
+            circuit.connect("D1", "K", "GND")
+        
+        # Buck Converter Pattern
+        elif requirements.circuit_type == "buck_converter":
+            # Simplified buck converter - would need more components
+            pass
+        
+        # Boost Converter Pattern
+        elif requirements.circuit_type == "boost_converter":
+            # Simplified boost converter - would need more components
+            pass
+        
+        # LED Circuit Pattern
+        elif requirements.circuit_type == "led_driver":
+            led_spec = db.get_by_mpn("LED-GREEN-0805") or db.search(category="led")[0]
+            res_spec = db.get_by_mpn("R-330-0805") or db.search(category="resistor")[0]
+            
+            d1 = Component(
+                ref="D1",
+                value=led_spec.value,
+                component_type=ComponentType.LED,
+                footprint=led_spec.footprint,
+                symbol=led_spec.symbol,
+                mpn=led_spec.mpn,
+            )
+            d1.add_pin("1", "K", PinType.PASSIVE)
+            d1.add_pin("2", "A", PinType.PASSIVE)
+            circuit.add_component(d1)
+
+            r1 = Component(
+                ref="R1",
+                value=res_spec.value,
+                component_type=ComponentType.RESISTOR,
+                footprint=res_spec.footprint,
+                symbol=res_spec.symbol,
+                mpn=res_spec.mpn,
+            )
+            r1.add_pin("1", "1", PinType.PASSIVE)
+            r1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(r1)
+            
+            circuit.connect("D1", "A", "R1_1")
+            circuit.connect("R1", "1", "R1_1")
+            circuit.connect("R1", "2", "VIN")
+            circuit.connect("D1", "K", "GND")
+        
         return circuit
 
 

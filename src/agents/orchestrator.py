@@ -81,7 +81,7 @@ class AIDesignOrchestrator:
         self.nl_pipeline = create_nl_pipeline("mock")  # Use mock LLM for now
         self.nl_pipeline.set_orchestrator(self)
 
-    def process_request(self, request: DesignRequest, output_dir: Path) -> DesignSummary:
+    async def process_request(self, request: DesignRequest, output_dir: Path) -> DesignSummary:
         """
         Executes full end-to-end circuit synthesis pipeline.
         """
@@ -95,13 +95,15 @@ class AIDesignOrchestrator:
         print(f"   📝 Prompt: {request.prompt}")
         
         # Use NL pipeline to convert natural language to CircuitIR
-        import asyncio
-        circuit = asyncio.run(self.nl_pipeline.process(request.prompt, request.project_name))
-        print(f"   ✅ Circuit IR created: {len(circuit.components)} components, {len(circuit.nets)} nets")
+        result = await self.nl_pipeline.process(request.prompt, request.project_name)
+        circuit_ir = result.get("circuit_ir")
+        requirements = result.get("requirements", {})
+        specification = result.get("specification", {})
+        print(f"   ✅ Circuit IR created: {len(circuit_ir.components)} components, {len(circuit_ir.nets)} nets")
 
         # Step 2: Validate circuit with ERC
         print("\n🔍 Step 2: Running ERC validation...")
-        validator = ERCValidator(circuit)
+        validator = ERCValidator(circuit_ir)
         erc_report = validator.validate()
         status = "✅ PASSED" if erc_report.passed else "❌ FAILED"
         print(f"   {status} - Errors: {erc_report.summary['errors']}, Warnings: {erc_report.summary['warnings']}")
@@ -110,7 +112,7 @@ class AIDesignOrchestrator:
         spice_result = None
         if request.run_spice:
             print("\n⚡ Step 3: Running SPICE simulation (ngspice)...")
-            spice_result = simulate_circuit(circuit)
+            spice_result = simulate_circuit(circuit_ir)
             if spice_result.success:
                 print(f"   ✅ SPICE simulation completed successfully")
             else:
@@ -118,7 +120,7 @@ class AIDesignOrchestrator:
 
         # Step 4: Compile KiCad EDA project files
         print("\n🔧 Step 4: Generating KiCad project files...")
-        generator = KiCadGenerator(circuit)
+        generator = KiCadGenerator(circuit_ir)
         generated_files = generator.export_project(output_dir, request.project_name)
         print(f"   ✅ Generated: SCH, PCB, PRO")
 
@@ -138,7 +140,7 @@ class AIDesignOrchestrator:
 
         # Step 6: Generate Bill of Materials (BOM)
         print("\n📦 Step 6: Generating Bill of Materials...")
-        bom = self._generate_bom(circuit)
+        bom = self._generate_bom(circuit_ir)
         total_cost = sum(item["total_price"] for item in bom)
         print(f"   ✅ BOM generated: {len(bom)} unique parts, ~${total_cost:.2f} estimated")
 
@@ -147,7 +149,7 @@ class AIDesignOrchestrator:
         try:
             from src.generators.gltf_exporter import export_pcb_gltf
             gltf_path = output_dir / f"{request.project_name}.gltf"
-            export_pcb_gltf(circuit, gltf_path, 100, 80)
+            export_pcb_gltf(circuit_ir, gltf_path, 100, 80)
             generated_files["gltf"] = gltf_path
             print(f"   ✅ 3D glTF exported: {gltf_path}")
         except Exception as e:
@@ -159,7 +161,7 @@ class AIDesignOrchestrator:
 
         return DesignSummary(
             project_name=request.project_name,
-            circuit_ir=circuit,
+            circuit_ir=circuit_ir,
             erc_report=erc_report,
             spice_result=spice_result,
             routing_result=routing_result,

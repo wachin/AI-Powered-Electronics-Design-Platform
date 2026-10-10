@@ -2,12 +2,18 @@
 Unit and Integration tests for AIDesignOrchestrator.
 """
 
+import asyncio
 import tempfile
 from pathlib import Path
 from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest
 
 
 def test_orchestrator_ldo_flow():
+    """Synchronous wrapper for the async test."""
+    asyncio.run(_test_orchestrator_ldo_flow_async())
+
+
+async def _test_orchestrator_ldo_flow_async():
     orchestrator = AIDesignOrchestrator()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -17,7 +23,7 @@ def test_orchestrator_ldo_flow():
             project_name="test_ldo",
         )
 
-        summary = orchestrator.process_request(request, out_dir)
+        summary = await orchestrator.process_request(request, out_dir)
 
         assert summary.project_name == "test_ldo"
         assert summary.erc_report.passed is True
