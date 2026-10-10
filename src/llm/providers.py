@@ -393,7 +393,11 @@ class MockLLMClient(LLMClient):
         temperature: float = 0.1,
     ) -> Dict[str, Any]:
         key = messages[-1].content if messages else "default"
-        return self.responses.get(key, {
+        # Try to match based on circuit type in the prompt
+        for response_key, response_value in self.responses.items():
+            if response_key != "default" and response_key in key:
+                return response_value
+        return self.responses.get("default", {
             "circuit_type": "ldo_regulator",
             "description": "Mock LDO regulator circuit",
             "input_voltage": 5.0,

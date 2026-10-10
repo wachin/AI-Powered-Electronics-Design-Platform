@@ -188,7 +188,6 @@ class TestCircuitSpecificationGenerator:
             ]
         }
 
-        client = MockLLMClient()
         db = None
         generator = CircuitSpecificationGenerator(client, db)
 

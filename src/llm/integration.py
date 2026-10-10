@@ -240,9 +240,10 @@ class RequirementParser:
 class CircuitSpecificationGenerator:
     """Generates detailed circuit specification from requirements."""
     
-    def __init__(self, llm_client: LLMClient, component_db):
+    def __init__(self, llm_client: LLMClient, component_db=None, use_llm: bool = True):
         self.llm = llm_client
         self.db = component_db
+        self.use_llm = use_llm
 
     def _make_component(self, role: str, mpn: str, manufacturer: str, value: str, 
                         package: str, reasoning: str = "") -> ComponentSpec:
@@ -275,6 +276,19 @@ class CircuitSpecificationGenerator:
                     "required": ["role", "mpn", "value", "package"]
                 }
             },
+            "connections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                        "net": {"type": "string"},
+                    },
+                    "required": ["from", "to", "net"]
+                }
+            },
+            "power_domains": {"type": "object"},
             "design_notes": {"type": "array", "items": {"type": "string"}},
             "warnings": {"type": "array", "items": {"type": "string"}},
         },
@@ -283,7 +297,13 @@ class CircuitSpecificationGenerator:
 
     async def generate(self, requirements: CircuitRequirement) -> CircuitSpecification:
         """Generate detailed circuit specification from requirements."""
-        # For now, use rule-based generation (LLM can be added later)
+        if self.use_llm:
+            try:
+                return await self._generate_with_llm(requirements)
+            except Exception as e:
+                logger.warning(f"LLM generation failed, falling back to rule-based: {e}")
+        
+        # Fallback to rule-based generation
         spec_dict = self._generate_spec(requirements)
         return CircuitSpecification(
             requirements=requirements,
@@ -295,11 +315,80 @@ class CircuitSpecificationGenerator:
             warnings=spec_dict.get("warnings", []),
         )
 
+    async def _generate_with_llm(self, requirements: CircuitRequirement) -> CircuitSpecification:
+        """Generate specification using LLM with structured output."""
+        system_prompt = """You are an expert electronics engineer. Generate a detailed circuit specification based on the requirements.
+        
+        Provide:
+        - topology: Circuit topology name (e.g., "LDO Linear Regulator", "Buck Converter", "Boost Converter")
+        - components: List of components with role, MPN, manufacturer, value, package, and reasoning
+        - connections: List of connections (from_component, to_component, net_name)
+        - power_domains: Dictionary of power domains with voltage levels
+        - design_notes: Important design considerations
+        - warnings: Any warnings or concerns
+        
+        Use real MPNs from major manufacturers (TI, Analog Devices, STMicroelectronics, Onsemi, Diodes Inc, etc.).
+        Select appropriate packages (SOT-23, SOIC-8, 0603, 0805, etc.) based on current/power requirements.
+        Include input/output capacitors, protection diodes, and indicator LEDs as appropriate."""
+
+        # Build context with requirements
+        req_context = f"""
+Circuit Type: {requirements.circuit_type}
+Description: {requirements.description}
+Input Voltage: {requirements.input_voltage}V
+Output Voltage: {requirements.output_voltage}V
+Output Current: {requirements.output_current}A
+Features: {requirements.features}
+Constraints: {requirements.constraints}
+"""
+
+        prompt = f"Generate a detailed circuit specification for:\n{req_context}"
+
+        try:
+            result = await self.llm.complete_structured(
+                messages=[
+                    LLMMessage(role="system", content=system_prompt),
+                    LLMMessage(role="user", content=prompt),
+                ],
+                response_schema=self.SPEC_SCHEMA
+            )
+            
+            # Validate required fields
+            if not result.get("topology") or not result.get("components"):
+                raise ValueError("LLM response missing required fields (topology, components)")
+            
+            # Convert dict components to ComponentSpec objects
+            components = []
+            for comp_dict in result.get("components", []):
+                components.append(ComponentSpec(
+                    role=comp_dict.get("role", ""),
+                    mpn=comp_dict.get("mpn", ""),
+                    manufacturer=comp_dict.get("manufacturer", ""),
+                    value=comp_dict.get("value", ""),
+                    package=comp_dict.get("package", ""),
+                    reasoning=comp_dict.get("reasoning", "")
+                ))
+            
+            return CircuitSpecification(
+                requirements=requirements,
+                topology=result.get("topology", ""),
+                components=components,
+                connections=result.get("connections", []),
+                power_domains=result.get("power_domains", {}),
+                design_notes=result.get("design_notes", []),
+                warnings=result.get("warnings", []),
+            )
+        except Exception as e:
+            logger.error(f"LLM specification generation failed: {e}")
+            raise
+
     def _generate_spec(self, req: CircuitRequirement) -> Dict[str, Any]:
         """Rule-based specification generation."""
         spec = {
             "topology": "",
             "components": [],
+            "connections": [],
+            "power_domains": {},
             "design_notes": [],
             "warnings": [],
         }
