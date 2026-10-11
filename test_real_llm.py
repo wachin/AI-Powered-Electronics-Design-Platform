@@ -99,7 +99,7 @@ async def main():
                 provider="openai",
                 api_key=nvidia_key,
                 base_url="https://integrate.api.nvidia.com/v1",
-                model="nvidia/nemotron-3-ultra"
+                model="nvidia/nemotron-3-ultra-550b-a55b"
             )
         ))
     
