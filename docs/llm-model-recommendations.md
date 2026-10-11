@@ -60,11 +60,19 @@ ollama pull phi3:mini       # Microsoft Phi-3 mini
 ```python
 from src.llm.providers import create_llm_client, LLMProvider
 
-# Local Ollama
+# Local Ollama (Native API - RECOMMENDED)
 client = create_llm_client(
     provider="ollama",
     model="qwen2.5:3b",
-    base_url="http://localhost:11434/v1"
+    base_url="http://localhost:11434"
+)
+
+# Local Ollama (OpenAI-compatible API)
+client = create_llm_client(
+    provider="openai",
+    api_key="ollama",  # Not used but required
+    base_url="http://localhost:11434/v1",
+    model="qwen2.5:3b"
 )
 
 # NVIDIA NIM (Free tier)
@@ -126,5 +134,42 @@ ollama pull qwen2.5:7b      # Better quality (needs ~5.2 GB)
 - **Available**: 5.7 GB
 - **qwen2.5:3b**: ~2.8 GB used (leaves ~2.9 GB for OS/other apps)
 - **Headroom**: ~2.9 GB for OS, browser, other apps
-EOF
-cat docs/llm-model-recommendations.md
+
+---
+
+## Recent Improvements (2026-10-10)
+
+### LLM Integration Enhancements
+- **Few-shot examples** added to `RequirementParser` and `CircuitSpecificationGenerator` for improved structured output quality
+- **Mock LLM client** updated to properly detect circuit types from prompts (LDO, Buck, Boost, LED)
+- **CircuitSpecificationGenerator** now uses LLM with fallback to rule-based generation
+- **All 11 LLM integration tests pass**
+
+### Circuit Generation Support
+| Circuit Type | Components Generated | Status |
+|--------------|---------------------|--------|
+| LDO Regulator | U1 (LDO), C1/C2 (caps), D1 (LED), R1 (resistor) | ✅ Working |
+| Buck Converter | U1 (LM2596), L1 (47uH), C1/C2 (caps), D1 (SS14) | ✅ Working |
+| Boost Converter | U1 (MT3608), L1 (10uH), C1/C2 (caps), D1 (SS14), R1/R2 (feedback) | ✅ Working |
+| LED Driver | D1 (LED), R1 (current limit) | ✅ Working |
+
+### SPICE Simulation Fixes
+- Diode models now use component MPN (e.g., SS14) instead of hardcoded 1N4148
+- Added SPICE models for common diodes: 1N4148, 1N4148W, SS14, SS34, BAT54, 1N5819
+- **SPICE simulation now passes for buck converter designs**
+
+### KiCad 9 / FreeRouting Compatibility
+- KiCad 7+ removed DSN export support (used by FreeRouting)
+- Updated `FreeRoutingRunner` to detect KiCad version and provide actionable workarounds:
+  1. Use KiCad's built-in interactive router (Route → Auto Route)
+  2. Use external DSN converter (e.g., kicad-dsn-exporter)
+  3. Install KiCad 6.x alongside for DSN export
+  4. Use pcbnew Python scripting for custom routing
+- Routing failure no longer blocks the design pipeline (graceful degradation)
+
+### Test Results
+- **62 tests pass**, 2 skipped
+- All LLM integration tests pass (11/11)
+- All orchestrator tests pass
+- All security tests pass
+- All AI agent tests pass

@@ -913,7 +913,7 @@ class NLToCircuitPipeline:
             ind_spec = db.get_by_mpn("SRR1280-470M") or IndSpec()
             c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
             c_out_spec = db.get_by_mpn("C-100uF-1206") or db.search(category="capacitor")[0]
-            diode_spec = db.get_by_mpn("SS34") or db.search(category="diode")[0]
+            diode_spec = db.get_by_mpn("SS14") or db.search(category="diode")[0]
 
             # Buck Controller U1 (LM2596S-5.0)
             u1 = Component(
@@ -1014,7 +1014,7 @@ class NLToCircuitPipeline:
             ind_spec = db.get_by_mpn("SRR0604-100M") or IndSpec()
             c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
             c_out_spec = db.get_by_mpn("C-22uF-0805") or db.search(category="capacitor")[0]
-            diode_spec = db.get_by_mpn("SS34") or db.search(category="diode")[0]
+            diode_spec = db.get_by_mpn("SS14") or db.search(category="diode")[0]
             res_spec = db.get_by_mpn("R-100k-0805") or db.search(category="resistor")[0]
             res2_spec = db.get_by_mpn("R-20k-0805") or db.search(category="resistor")[0]
 

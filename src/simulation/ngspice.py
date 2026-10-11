@@ -127,6 +127,18 @@ class CircuitIRToSpice:
         # Ground reference
         lines.append(".global GND")
 
+        # Diode model definitions
+        lines.extend([
+            "",
+            "* Diode Models",
+            ".model 1N4148 D (IS=2.52e-9 RS=0.568 N=1.75 BV=100 IBV=5e-6 CJO=4pF VJ=0.7 M=0.333 TT=4nS)",
+            ".model 1N4148W D (IS=2.52e-9 RS=0.568 N=1.75 BV=100 IBV=5e-6 CJO=4pF VJ=0.7 M=0.333 TT=4nS)",  # SOD-123 version
+            ".model SS14 D (IS=3.2e-8 RS=0.035 N=1.1 BV=40 IBV=1e-3 CJO=110pF VJ=0.4 M=0.5 TT=0)",  # Schottky 1A/40V
+            ".model SS34 D (IS=3.2e-8 RS=0.035 N=1.1 BV=40 IBV=1e-3 CJO=110pF VJ=0.4 M=0.5 TT=0)",  # Schottky 3A/40V
+            ".model BAT54 D (IS=1.5e-7 RS=0.5 N=1.1 BV=30 IBV=1e-4 CJO=10pF VJ=0.5 M=0.33)",  # Schottky 0.2A/30V
+            ".model 1N5819 D (IS=5e-7 RS=0.04 N=1.1 BV=40 IBV=1e-3 CJO=50pF VJ=0.5 M=0.33)",  # Schottky 1A/40V
+        ])
+
         # Standard simulation commands - DC analysis only for now
         lines.extend([
             "",
@@ -157,7 +169,9 @@ class CircuitIRToSpice:
             # Assume pin 1 = cathode, pin 2 = anode
             cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
             anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
-            lines.append(f"D{ref} {anode} {cathode} 1N4148")
+            # Use MPN for diode model if available, otherwise default to 1N4148
+            diode_model = comp.mpn if comp.mpn else "1N4148"
+            lines.append(f"D{ref} {anode} {cathode} {diode_model}")
 
         elif comp.component_type == ComponentType.LED:
             # LED modeled as diode with forward voltage
@@ -209,7 +223,9 @@ class CircuitIRToSpice:
             # Assume pin 1 = cathode, pin 2 = anode
             cathode = self._get_spice_net_name(comp.pins[0].connected_net) if comp.pins[0].name in ('K', 'CATHODE', '1') else self._get_spice_net_name(comp.pins[1].connected_net)
             anode = self._get_spice_net_name(comp.pins[1].connected_net) if comp.pins[1].name in ('A', 'ANODE', '2') else self._get_spice_net_name(comp.pins[0].connected_net)
-            lines.append(f"D{ref} {anode} {cathode} 1N4148")
+            # Use MPN for diode model if available, otherwise default to 1N4148
+            diode_model = comp.mpn if comp.mpn else "1N4148"
+            lines.append(f"D{ref} {anode} {cathode} {diode_model}")
 
         elif comp.component_type == ComponentType.LED:
             # LED modeled as diode with forward voltage

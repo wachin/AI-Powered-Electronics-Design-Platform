@@ -16,7 +16,12 @@ def test_freerouting_runner_init():
 @patch('subprocess.run')
 def test_export_dsn(mock_run, tmp_path):
     """Test DSN export via kicad-cli."""
-    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    # First call: version check (returns KiCad 6.0 for compatibility)
+    # Second call: actual DSN export
+    mock_run.side_effect = [
+        MagicMock(returncode=0, stdout="6.0.10", stderr=""),  # version check
+        MagicMock(returncode=0, stdout="", stderr="")        # DSN export
+    ]
     
     runner = FreeRoutingRunner()
     pcb_path = tmp_path / "test.kicad_pcb"
@@ -26,7 +31,13 @@ def test_export_dsn(mock_run, tmp_path):
     result = runner._export_dsn(pcb_path, dsn_path)
     
     assert result.success is True
-    mock_run.assert_called_once()
+    assert mock_run.call_count == 2
+    # First call: version check
+    args_v = mock_run.call_args_list[0][0][0]
+    assert args_v == ["kicad-cli", "--version"]
+    # Second call: DSN export
+    args_e = mock_run.call_args_list[1][0][0]
+    assert args_e[:4] == ["kicad-cli", "pcb", "export", "dsn"]
 
 
 @patch('subprocess.run')

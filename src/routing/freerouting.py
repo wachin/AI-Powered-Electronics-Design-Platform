@@ -97,6 +97,34 @@ class FreeRoutingRunner:
         Note: KiCad 7+ removed DSN export support. This will fail on KiCad 7+.
         For DSN export, you need KiCad 6 or use an external converter.
         """
+        # Check KiCad version first
+        try:
+            version_result = subprocess.run(
+                ["kicad-cli", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if version_result.returncode == 0:
+                version_str = version_result.stdout.strip()
+                # Parse version (e.g., "9.0.1" or "8.0.4")
+                major_version = int(version_str.split('.')[0]) if version_str.split('.')[0].isdigit() else 0
+                if major_version >= 7:
+                    return RoutingResult(
+                        success=False,
+                        error=(
+                            f"KiCad {version_str} detected: DSN export was removed in KiCad 7+.\n"
+                            "FreeRouting requires DSN format which is no longer supported.\n"
+                            "Workarounds:\n"
+                            "  1. Use KiCad's built-in interactive router (Route -> Auto Route)\n"
+                            "  2. Use an external DSN converter (e.g., kicad-dsn-exporter)\n"
+                            "  3. Install KiCad 6.x alongside for DSN export\n"
+                            "  4. Use pcbnew Python scripting for custom routing"
+                        )
+                    )
+        except Exception:
+            pass  # Version check failed, try anyway
+        
         try:
             result = subprocess.run(
                 ["kicad-cli", "pcb", "export", "dsn", str(pcb_path), "-o", str(dsn_path)],
