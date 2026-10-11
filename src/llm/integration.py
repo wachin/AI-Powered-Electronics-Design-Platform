@@ -157,9 +157,67 @@ class RequirementParser:
         "required": ["circuit_type", "description"]
     }
 
+    # Few-shot examples for requirement parsing
+    PARSE_EXAMPLES = [
+        {
+            "input": "Design a 5V to 3.3V LDO regulator circuit with 500mA output current and LED power indicator",
+            "output": {
+                "circuit_type": "ldo_regulator",
+                "description": "5V to 3.3V LDO regulator with LED indicator",
+                "input_voltage": 5.0,
+                "output_voltage": 3.3,
+                "output_current": 0.5,
+                "features": ["led_indicator"],
+                "constraints": {}
+            }
+        },
+        {
+            "input": "I need a buck converter that steps down 12V to 5V at 3A for a Raspberry Pi",
+            "output": {
+                "circuit_type": "buck_converter",
+                "description": "12V to 5V buck converter for Raspberry Pi",
+                "input_voltage": 12.0,
+                "output_voltage": 5.0,
+                "output_current": 3.0,
+                "features": [],
+                "constraints": {"application": "raspberry_pi"}
+            }
+        },
+        {
+            "input": "Create a boost converter from 3.3V to 5V at 1A for USB charging",
+            "output": {
+                "circuit_type": "boost_converter",
+                "description": "3.3V to 5V boost converter for USB charging",
+                "input_voltage": 3.3,
+                "output_voltage": 5.0,
+                "output_current": 1.0,
+                "features": ["usb_charging"],
+                "constraints": {}
+            }
+        },
+        {
+            "input": "Simple LED driver circuit with 5V input and 20mA current limit",
+            "output": {
+                "circuit_type": "led_driver",
+                "description": "5V LED driver with 20mA current limit",
+                "input_voltage": 5.0,
+                "output_voltage": None,
+                "output_current": 0.02,
+                "features": [],
+                "constraints": {"current_limit": 0.02}
+            }
+        }
+    ]
+
     async def parse(self, natural_language: str) -> CircuitRequirement:
         """Parse natural language into structured circuit requirements."""
-        system_prompt = """You are an expert electronics engineer. Parse the user's natural language description into structured circuit requirements.
+        # Build few-shot examples
+        examples_text = "\n\n".join([
+            f"Input: {ex['input']}\nOutput: {json.dumps(ex['output'])}"
+            for ex in self.PARSE_EXAMPLES
+        ])
+        
+        system_prompt = f"""You are an expert electronics engineer. Parse the user's natural language description into structured circuit requirements.
         
         Extract the following information:
         - circuit_type: One of [ldo_regulator, buck_converter, boost_converter, led_driver, mcu_board, generic]
@@ -170,7 +228,10 @@ class RequirementParser:
         - constraints: Any additional constraints (size, cost, temperature, etc.)
         
         If a value is not mentioned, use null.
-        Be precise and only extract what is explicitly stated or strongly implied."""
+        Be precise and only extract what is explicitly stated or strongly implied.
+        
+        Examples:
+        {examples_text}"""
 
         prompt = f"Parse this circuit description: {natural_language}"
 
@@ -257,6 +318,66 @@ class CircuitSpecificationGenerator:
             reasoning=reasoning
         )
 
+    # Few-shot examples for specification generation
+    SPEC_EXAMPLES = {
+        "ldo_regulator": {
+            "topology": "LDO Linear Regulator",
+            "components": [
+                {"role": "regulator", "mpn": "AMS1117-3.3", "manufacturer": "AMS", "value": "3.3V", "package": "SOT-223", "reasoning": "LDO regulator 5V to 3.3V, 1A"},
+                {"role": "input_capacitor", "mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Input decoupling capacitor"},
+                {"role": "output_capacitor", "mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Output stability capacitor"},
+                {"role": "led_indicator", "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805", "reasoning": "Power-on indicator LED"},
+                {"role": "led_resistor", "mpn": "RC0805FR-0710KL", "manufacturer": "Yageo", "value": "10k", "package": "0805", "reasoning": "LED current limiting resistor"}
+            ],
+            "connections": [
+                {"from": "U1", "to": "C1", "net": "VIN"},
+                {"from": "C1", "to": "GND", "net": "GND"},
+                {"from": "U1", "to": "C2", "net": "VOUT"},
+                {"from": "C2", "to": "GND", "net": "GND"},
+                {"from": "U1", "to": "R1", "net": "VOUT"},
+                {"from": "R1", "to": "D1", "net": "D1_A"},
+                {"from": "D1", "to": "GND", "net": "GND"}
+            ],
+            "power_domains": {"VIN": 5.0, "VOUT": 3.3, "GND": 0.0},
+            "design_notes": ["LDO dropout: 1.7V", "Power dissipation: 0.85W", "Ensure adequate thermal relief"],
+            "warnings": ["Check thermal dissipation for high current", "Verify dropout voltage at max current"]
+        },
+        "buck_converter": {
+            "topology": "Asynchronous Buck Converter",
+            "components": [
+                {"role": "controller", "mpn": "LM2596S-5.0", "manufacturer": "TI", "value": "5V", "package": "TO-220-5", "reasoning": "Buck converter controller"},
+                {"role": "inductor", "mpn": "SRR1280-470M", "manufacturer": "Bourns", "value": "47uH", "package": "12x12mm", "reasoning": "Buck inductor"},
+                {"role": "input_capacitor", "mpn": "C-10uF-0805", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Input decoupling"},
+                {"role": "output_capacitor", "mpn": "C-100uF-1206", "manufacturer": "Yageo", "value": "100uF", "package": "1206", "reasoning": "Output filtering"},
+                {"role": "freewheel_diode", "mpn": "SS34", "manufacturer": "Vishay", "value": "3A/40V", "package": "SMA", "reasoning": "Freewheeling diode"}
+            ],
+            "connections": [
+                {"from": "U1", "to": "L1", "net": "SW"},
+                {"from": "L1", "to": "D1", "net": "SW"},
+                {"from": "L1", "to": "C2", "net": "VOUT"},
+                {"from": "C1", "to": "U1", "net": "VIN"}
+            ],
+            "power_domains": {"VIN": 12.0, "VOUT": 5.0, "GND": 0.0},
+            "design_notes": ["Asynchronous buck converter", "Consider sync rectification for >90% efficiency"],
+            "warnings": ["Diode loss significant at high current"]
+        },
+        "led_driver": {
+            "topology": "Series Resistor LED Driver",
+            "components": [
+                {"role": "led", "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805", "reasoning": "Green indicator LED"},
+                {"role": "current_limit_resistor", "mpn": "RC0805FR-071K5L", "manufacturer": "Yageo", "value": "1.5k", "package": "0805", "reasoning": "Current limiting resistor for 20mA"}
+            ],
+            "connections": [
+                {"from": "VIN", "to": "R1", "net": "VIN"},
+                {"from": "R1", "to": "D1", "net": "D1_A"},
+                {"from": "D1", "to": "GND", "net": "GND"}
+            ],
+            "power_domains": {"VIN": 5.0, "GND": 0.0},
+            "design_notes": ["Simple series resistor drive", "Resistor value: (5V - 2.1V) / 0.02A = 145 ohm, use 1.5k for lower brightness"],
+            "warnings": ["Resistor dissipates power: I^2*R = 4mW", "LED forward voltage varies by color"]
+        }
+    }
+
     SPEC_SCHEMA = {
         "type": "object",
         "properties": {
@@ -317,7 +438,11 @@ class CircuitSpecificationGenerator:
 
     async def _generate_with_llm(self, requirements: CircuitRequirement) -> CircuitSpecification:
         """Generate specification using LLM with structured output."""
-        system_prompt = """You are an expert electronics engineer. Generate a detailed circuit specification based on the requirements.
+        # Get few-shot example for this circuit type
+        example = self.SPEC_EXAMPLES.get(requirements.circuit_type, {})
+        example_text = json.dumps(example, indent=2) if example else "No example available for this circuit type."
+        
+        system_prompt = f"""You are an expert electronics engineer. Generate a detailed circuit specification based on the requirements.
         
         Provide:
         - topology: Circuit topology name (e.g., "LDO Linear Regulator", "Buck Converter", "Boost Converter")
@@ -329,7 +454,10 @@ class CircuitSpecificationGenerator:
         
         Use real MPNs from major manufacturers (TI, Analog Devices, STMicroelectronics, Onsemi, Diodes Inc, etc.).
         Select appropriate packages (SOT-23, SOIC-8, 0603, 0805, etc.) based on current/power requirements.
-        Include input/output capacitors, protection diodes, and indicator LEDs as appropriate."""
+        Include input/output capacitors, protection diodes, and indicator LEDs as appropriate.
+        
+        Example for {requirements.circuit_type}:
+        {example_text}"""
 
         # Build context with requirements
         req_context = f"""
@@ -774,13 +902,237 @@ class NLToCircuitPipeline:
         
         # Buck Converter Pattern
         elif requirements.circuit_type == "buck_converter":
-            # Simplified buck converter - would need more components
-            pass
+            # Fetch parts from DB
+            ctrl_spec = db.get_by_mpn("LM2596S-5.0") or db.search(category="regulator_buck")[0]
+            # Create fallback inductor spec if not in DB
+            class IndSpec:
+                value = "47uH"
+                footprint = "12x12mm"
+                symbol = "Inductor"
+                mpn = "SRR1280-470M"
+            ind_spec = db.get_by_mpn("SRR1280-470M") or IndSpec()
+            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
+            c_out_spec = db.get_by_mpn("C-100uF-1206") or db.search(category="capacitor")[0]
+            diode_spec = db.get_by_mpn("SS34") or db.search(category="diode")[0]
+
+            # Buck Controller U1 (LM2596S-5.0)
+            u1 = Component(
+                ref="U1",
+                value=ctrl_spec.value,
+                component_type=ComponentType.REGULATOR_BUCK,
+                footprint=ctrl_spec.footprint,
+                symbol=ctrl_spec.symbol,
+                mpn=ctrl_spec.mpn,
+                manufacturer=ctrl_spec.manufacturer,
+                description=ctrl_spec.description,
+            )
+            # LM2596 pins: 1=VIN, 2=SW, 3=GND, 4=FB, 5=ON/OFF
+            u1.add_pin("1", "VIN", PinType.POWER_IN)
+            u1.add_pin("2", "SW", PinType.OUTPUT)
+            u1.add_pin("3", "GND", PinType.POWER_IN)
+            u1.add_pin("4", "FB", PinType.INPUT)
+            u1.add_pin("5", "EN", PinType.INPUT)
+            circuit.add_component(u1)
+
+            # Inductor L1
+            l1 = Component(
+                ref="L1",
+                value=ind_spec.value,
+                component_type=ComponentType.INDUCTOR,
+                footprint=ind_spec.footprint,
+                symbol=ind_spec.symbol,
+                mpn=ind_spec.mpn,
+            )
+            l1.add_pin("1", "1", PinType.PASSIVE)
+            l1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(l1)
+
+            # Input Capacitor C1
+            c1 = Component(
+                ref="C1",
+                value=c_in_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_in_spec.footprint,
+                symbol=c_in_spec.symbol,
+                mpn=c_in_spec.mpn,
+            )
+            c1.add_pin("1", "1", PinType.PASSIVE)
+            c1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c1)
+
+            # Output Capacitor C2
+            c2 = Component(
+                ref="C2",
+                value=c_out_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_out_spec.footprint,
+                symbol=c_out_spec.symbol,
+                mpn=c_out_spec.mpn,
+            )
+            c2.add_pin("1", "1", PinType.PASSIVE)
+            c2.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c2)
+
+            # Freewheeling Diode D1
+            d1 = Component(
+                ref="D1",
+                value=diode_spec.value,
+                component_type=ComponentType.DIODE,
+                footprint=diode_spec.footprint,
+                symbol=diode_spec.symbol,
+                mpn=diode_spec.mpn,
+            )
+            d1.add_pin("1", "A", PinType.PASSIVE)
+            d1.add_pin("2", "K", PinType.PASSIVE)
+            circuit.add_component(d1)
+
+            # Nets for buck converter
+            circuit.connect("U1", "1", "VIN")       # VIN
+            circuit.connect("U1", "2", "SW")        # Switch node
+            circuit.connect("U1", "3", "GND")       # GND
+            circuit.connect("U1", "5", "VIN")       # EN tied to VIN
+            circuit.connect("L1", "1", "SW")        # Inductor to switch node
+            circuit.connect("L1", "2", "VOUT")      # Inductor to output
+            circuit.connect("C1", "1", "VIN")
+            circuit.connect("C1", "2", "GND")
+            circuit.connect("C2", "1", "VOUT")
+            circuit.connect("C2", "2", "GND")
+            circuit.connect("D1", "A", "SW")        # Diode anode to switch node
+            circuit.connect("D1", "K", "VOUT")      # Diode cathode to output
+            # Feedback divider (simplified - would need R1, R2 for adjustable version)
+            circuit.connect("U1", "4", "VOUT")      # FB directly to output for fixed 5V version
         
         # Boost Converter Pattern
         elif requirements.circuit_type == "boost_converter":
-            # Simplified boost converter - would need more components
-            pass
+            # Fetch parts from DB
+            ctrl_spec = db.get_by_mpn("MT3608") or db.search(category="regulator_buck")[0]
+            class IndSpec:
+                value = "10uH"
+                footprint = "6x6mm"
+                symbol = "Inductor"
+                mpn = "SRR0604-100M"
+            ind_spec = db.get_by_mpn("SRR0604-100M") or IndSpec()
+            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
+            c_out_spec = db.get_by_mpn("C-22uF-0805") or db.search(category="capacitor")[0]
+            diode_spec = db.get_by_mpn("SS34") or db.search(category="diode")[0]
+            res_spec = db.get_by_mpn("R-100k-0805") or db.search(category="resistor")[0]
+            res2_spec = db.get_by_mpn("R-20k-0805") or db.search(category="resistor")[0]
+
+            # Boost Controller U1 (MT3608)
+            u1 = Component(
+                ref="U1",
+                value=ctrl_spec.value,
+                component_type=ComponentType.REGULATOR_BOOST,
+                footprint=ctrl_spec.footprint,
+                symbol=ctrl_spec.symbol,
+                mpn=ctrl_spec.mpn,
+                manufacturer=ctrl_spec.manufacturer,
+                description=ctrl_spec.description,
+            )
+            # MT3608 pins: 1=SW, 2=GND, 3=FB, 4=EN, 5=VIN, 6=NC
+            u1.add_pin("1", "SW", PinType.OUTPUT)
+            u1.add_pin("2", "GND", PinType.POWER_IN)
+            u1.add_pin("3", "FB", PinType.INPUT)
+            u1.add_pin("4", "EN", PinType.INPUT)
+            u1.add_pin("5", "VIN", PinType.POWER_IN)
+            circuit.add_component(u1)
+
+            # Inductor L1
+            l1 = Component(
+                ref="L1",
+                value=ind_spec.value,
+                component_type=ComponentType.INDUCTOR,
+                footprint=ind_spec.footprint,
+                symbol=ind_spec.symbol,
+                mpn=ind_spec.mpn,
+            )
+            l1.add_pin("1", "1", PinType.PASSIVE)
+            l1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(l1)
+
+            # Input Capacitor C1
+            c1 = Component(
+                ref="C1",
+                value=c_in_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_in_spec.footprint,
+                symbol=c_in_spec.symbol,
+                mpn=c_in_spec.mpn,
+            )
+            c1.add_pin("1", "1", PinType.PASSIVE)
+            c1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c1)
+
+            # Output Capacitor C2
+            c2 = Component(
+                ref="C2",
+                value=c_out_spec.value,
+                component_type=ComponentType.CAPACITOR,
+                footprint=c_out_spec.footprint,
+                symbol=c_out_spec.symbol,
+                mpn=c_out_spec.mpn,
+            )
+            c2.add_pin("1", "1", PinType.PASSIVE)
+            c2.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(c2)
+
+            # Schottky Diode D1
+            d1 = Component(
+                ref="D1",
+                value=diode_spec.value,
+                component_type=ComponentType.DIODE,
+                footprint=diode_spec.footprint,
+                symbol=diode_spec.symbol,
+                mpn=diode_spec.mpn,
+            )
+            d1.add_pin("1", "A", PinType.PASSIVE)
+            d1.add_pin("2", "K", PinType.PASSIVE)
+            circuit.add_component(d1)
+
+            # Feedback Resistors R1 (top), R2 (bottom)
+            r1 = Component(
+                ref="R1",
+                value=res_spec.value,
+                component_type=ComponentType.RESISTOR,
+                footprint=res_spec.footprint,
+                symbol=res_spec.symbol,
+                mpn=res_spec.mpn,
+            )
+            r1.add_pin("1", "1", PinType.PASSIVE)
+            r1.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(r1)
+
+            r2 = Component(
+                ref="R2",
+                value=res2_spec.value,
+                component_type=ComponentType.RESISTOR,
+                footprint=res2_spec.footprint,
+                symbol=res2_spec.symbol,
+                mpn=res2_spec.mpn,
+            )
+            r2.add_pin("1", "1", PinType.PASSIVE)
+            r2.add_pin("2", "2", PinType.PASSIVE)
+            circuit.add_component(r2)
+
+            # Nets for boost converter
+            circuit.connect("U1", "5", "VIN")       # VIN
+            circuit.connect("U1", "2", "GND")       # GND
+            circuit.connect("U1", "4", "VIN")       # EN tied to VIN
+            circuit.connect("L1", "1", "VIN")       # Inductor to VIN
+            circuit.connect("L1", "2", "SW")        # Inductor to switch node
+            circuit.connect("U1", "1", "SW")        # Switch pin to switch node
+            circuit.connect("D1", "A", "SW")        # Diode anode to switch node
+            circuit.connect("D1", "K", "VOUT")      # Diode cathode to output
+            circuit.connect("C1", "1", "VIN")
+            circuit.connect("C1", "2", "GND")
+            circuit.connect("C2", "1", "VOUT")
+            circuit.connect("C2", "2", "GND")
+            # Feedback divider: VOUT -> R1 -> FB -> R2 -> GND
+            circuit.connect("R1", "1", "VOUT")
+            circuit.connect("R1", "2", "FB_NODE")
+            circuit.connect("R2", "1", "FB_NODE")
+            circuit.connect("R2", "2", "GND")
+            circuit.connect("U1", "3", "FB_NODE")
         
         # LED Circuit Pattern
         elif requirements.circuit_type == "led_driver":

@@ -39,6 +39,8 @@ class ComponentType(Enum):
     SWITCH = "switch"
     CRYSTAL = "crystal"
     TESTPOINT = "testpoint"
+    VOLTAGE_SOURCE = "voltage_source"
+    CURRENT_SOURCE = "current_source"
     CUSTOM = "custom"
 
 

@@ -394,9 +394,48 @@ class MockLLMClient(LLMClient):
     ) -> Dict[str, Any]:
         key = messages[-1].content if messages else "default"
         # Try to match based on circuit type in the prompt
+        prompt_text = key.lower()
+        
+        # Check for explicit circuit type keywords in prompt - order matters!
+        # Check more specific terms first
+        if "buck" in prompt_text and ("converter" in prompt_text or "step-down" in prompt_text):
+            return self.responses.get("buck", {
+                "circuit_type": "buck_converter",
+                "description": "Mock buck converter circuit",
+                "input_voltage": 12.0,
+                "output_voltage": 5.0,
+                "output_current": 3.0,
+            })
+        elif "boost" in prompt_text and ("converter" in prompt_text or "step-up" in prompt_text):
+            return self.responses.get("boost", {
+                "circuit_type": "boost_converter",
+                "description": "Mock boost converter circuit",
+                "input_voltage": 3.3,
+                "output_voltage": 5.0,
+                "output_current": 1.0,
+            })
+        elif "ldo" in prompt_text or "linear regulator" in prompt_text:
+            return self.responses.get("ldo", {
+                "circuit_type": "ldo_regulator",
+                "description": "Mock LDO regulator circuit",
+                "input_voltage": 5.0,
+                "output_voltage": 3.3,
+                "output_current": 0.5,
+            })
+        elif "led driver" in prompt_text:
+            return self.responses.get("led", {
+                "circuit_type": "led_driver",
+                "description": "Mock LED driver circuit",
+                "input_voltage": 5.0,
+                "output_voltage": None,
+                "output_current": 0.02,
+            })
+        
+        # Try to match based on response keys
         for response_key, response_value in self.responses.items():
             if response_key != "default" and response_key in key:
                 return response_value
+        
         return self.responses.get("default", {
             "circuit_type": "ldo_regulator",
             "description": "Mock LDO regulator circuit",
