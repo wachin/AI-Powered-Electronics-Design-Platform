@@ -216,7 +216,7 @@ python main.py -p "Simple LED circuit" --no-spice --no-routing
 deactivate
 ```
 
-### 1. Activate Virtual Environment
+## 1. Activate Virtual Environment
 
 ```bash
 cd AI-Powered-Electronics-Design-Platform
