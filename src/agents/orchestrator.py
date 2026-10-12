@@ -29,6 +29,7 @@ from src.components.database import ComponentDatabase, ComponentSpec
 from src.simulation.ngspice import simulate_circuit, SimulationResult
 from src.routing.freerouting import route_kicad_pcb, RoutingResult
 from src.llm.integration import NLToCircuitPipeline, create_nl_pipeline
+from src.llm.providers import create_llm_client
 
 
 @dataclass
@@ -48,6 +49,12 @@ class DesignSummary:
     routing_result: Optional[RoutingResult]
     generated_files: Dict[str, Path]
     bom: List[Dict[str, Any]]
+    # Provenance: whether the design came from an LLM or the deterministic
+    # template generator, and any substitution/inference notes.
+    used_llm: bool = True
+    topology: str = ""
+    design_notes: List[str] = field(default_factory=list)
+    validation: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -56,7 +63,12 @@ class DesignSummary:
             "erc_report": self.erc_report.to_dict(),
             "generated_files": {k: str(v) for k, v in self.generated_files.items()},
             "bom": self.bom,
+            "used_llm": self.used_llm,
+            "topology": self.topology,
+            "design_notes": self.design_notes,
         }
+        if self.validation is not None:
+            result["validation"] = self.validation
         if self.spice_result:
             result["spice_result"] = {
                 "success": self.spice_result.success,
@@ -76,9 +88,35 @@ class AIDesignOrchestrator:
     AI Orchestrator driving autonomous electronics design generation.
     """
 
-    def __init__(self, db: Optional[ComponentDatabase] = None, llm_provider: str = "mock"):
+    def __init__(
+        self,
+        db: Optional[ComponentDatabase] = None,
+        llm_provider: str = "mock",
+        llm_model: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        allow_fallback: bool = True,
+        max_repairs: int = 2,
+    ):
         self.db = db or ComponentDatabase()
-        self.nl_pipeline = create_nl_pipeline("mock")  # Use mock LLM for now
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+        self.llm_base_url = llm_base_url
+
+        # Build the configured client. "mock" keeps the deterministic
+        # template path for tests; any real provider name drives the LLM.
+        client_kwargs: Dict[str, Any] = {}
+        if llm_model:
+            client_kwargs["model"] = llm_model
+        if llm_base_url:
+            client_kwargs["base_url"] = llm_base_url
+        llm_client = create_llm_client(llm_provider, **client_kwargs)
+
+        self.nl_pipeline = NLToCircuitPipeline(
+            llm_client=llm_client,
+            component_db=self.db,
+            allow_fallback=allow_fallback,
+            max_repairs=max_repairs,
+        )
         self.nl_pipeline.set_orchestrator(self)
 
     async def process_request(self, request: DesignRequest, output_dir: Path) -> DesignSummary:
@@ -167,6 +205,12 @@ class AIDesignOrchestrator:
             routing_result=routing_result,
             generated_files=generated_files,
             bom=bom,
+            used_llm=getattr(specification, "used_llm", True),
+            topology=getattr(specification, "topology", "") or "",
+            design_notes=list(getattr(specification, "warnings", []) or []),
+            validation=result.get("validation").to_dict()
+            if result.get("validation") is not None
+            else None,
         )
 
     def _synthesize_circuit_ir(self, prompt: str, project_name: str) -> CircuitIR:
@@ -325,9 +369,15 @@ class AIDesignOrchestrator:
                 spec = self.db.get_by_mpn(mpn)
                 price = spec.price if spec else 0.0
                 mfr = comp.manufacturer or (spec.manufacturer if spec else "Generic")
+                description = (
+                    comp.description
+                    or (spec.description if spec else "")
+                    or comp.value
+                )
                 bom_map[mpn] = {
                     "mpn": mpn,
                     "value": comp.value,
+                    "description": description,
                     "footprint": comp.footprint,
                     "manufacturer": mfr,
                     "quantity": 0,

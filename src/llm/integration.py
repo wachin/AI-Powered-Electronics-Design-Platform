@@ -16,11 +16,30 @@ from src.llm.providers import (
     LLMProvider,
     LLMMessage,
     MockLLMClient,
+    LLMResponseError,
 )
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType, PowerDomain
+from src.core.circuit_builder import CircuitIRBuilder, BuildReport
+from src.llm.validation import DesignValidator, DesignValidationReport
 from src.components.database import ComponentDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _report_score(report: DesignValidationReport) -> int:
+    """
+    Rank validation reports so repair keeps the best attempt, never a worse one.
+
+    Fewest errors always wins: a larger circuit that violates the electrical
+    rules is worse than a smaller circuit that does not. Component count is
+    only a tie-breaker between attempts with the same error count, so a more
+    complete design is preferred when both are equally correct.
+    """
+    error_count = len(report.errors)
+    component_count = (
+        len(report.circuit.components) if report.circuit is not None else 0
+    )
+    return -error_count * 1000 + min(component_count, 999)
 
 
 @dataclass
@@ -37,25 +56,18 @@ class ComponentSpec:
         """Allow dictionary-style access for backward compatibility."""
         return getattr(self, key)
 
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
-
     def __contains__(self, key: str) -> bool:
         return hasattr(self, key)
 
     def get(self, key: str, default=None) -> Any:
         return getattr(self, key, default)
 
-    def __iter__(self):
-        yield "role"
-        yield "mpn"
-        yield "manufacturer"
-        yield "value"
-        yield "package"
-        yield "reasoning"
-
     def keys(self):
         return ["role", "mpn", "manufacturer", "value", "package", "reasoning"]
+
+    def __iter__(self):
+        """Iterate keys so dict(spec) and mapping consumers work."""
+        return iter(self.keys())
 
     def values(self):
         return [self.role, self.mpn, self.manufacturer, self.value, self.package, self.reasoning]
@@ -69,15 +81,6 @@ class ComponentSpec:
             ("package", self.package),
             ("reasoning", self.reasoning),
         ]
-
-    def __iter__(self):
-        return iter(self.keys())
-
-    def keys(self):
-        return self.keys()
-
-    def __contains__(self, key):
-        return key in ["role", "mpn", "manufacturer", "value", "package", "reasoning"]
 
 
 @dataclass
@@ -112,6 +115,11 @@ class CircuitSpecification:
     power_domains: Dict[str, Dict[str, float]] = field(default_factory=dict)
     design_notes: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # Populated by the validated generation path: build report, ERC results and
+    # the list of problems that were found (and either repaired or reported).
+    validation: Optional[Dict[str, Any]] = None
+    repair_attempts: int = 0
+    used_llm: bool = True
 
     def __post_init__(self):
         # Convert any dict components to ComponentSpec objects
@@ -273,50 +281,97 @@ class RequirementParser:
             return self._fallback_parse(natural_language)
 
     def _fallback_parse(self, text: str) -> CircuitRequirement:
-        """Simple keyword-based fallback parser."""
+        """
+        Keyword-based requirement parser used when the LLM is unavailable.
+
+        This deliberately errs toward recognising a topology rather than
+        defaulting to "generic", because a mis-classified request produces a
+        confidently wrong circuit.
+        """
+        import re
+
         text_lower = text.lower()
-        
+
         circuit_type = "generic"
         if any(k in text_lower for k in ["ldo", "linear regulator"]):
             circuit_type = "ldo_regulator"
-        elif "buck" in text_lower or "step-down" in text_lower:
+        elif "buck" in text_lower or "step-down" in text_lower or "step down" in text_lower:
             circuit_type = "buck_converter"
-        elif "boost" in text_lower or "step-up" in text_lower:
+        elif "boost" in text_lower or "step-up" in text_lower or "step up" in text_lower:
             circuit_type = "boost_converter"
-        elif "led" in text_lower and "driver" in text_lower:
+        elif "phono" in text_lower or "riaa" in text_lower:
+            circuit_type = "phono_preamp"
+        elif "led" in text_lower:
+            # Any mention of an LED (with a resistor, "driver", "indicator")
+            # is an LED circuit; the LDO/regulator branches above win when the
+            # prompt also asks for a regulator.
             circuit_type = "led_driver"
-        
-        # Extract voltages
-        import re
-        v_in = None
-        v_out = None
-        current = None
-        
-        for pattern, var in [(r'(\d+(?:\.\d+)?)\s*v\s*(?:to|->|→)\s*(\d+(?:\.\d+)?)', 'both'),
-                             (r'(\d+(?:\.\d+)?)\s*v\s*(?:in|input)', 'in'),
-                             (r'(\d+(?:\.\d+)?)\s*v\s*(?:out|output)', 'out')]:
+
+        def _number(pattern: str) -> Optional[float]:
             match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                if var == 'both':
-                    v_in, v_out = match.groups()
-                    break
-        
+            if not match:
+                return None
+            try:
+                return float(match.group(1))
+            except (TypeError, ValueError):
+                return None
+
+        # "5V to 3.3V" / "5v->3.3v" / "5 V → 3.3 V" style ranges.
+        span = re.search(
+            r"(\d+(?:\.\d+)?)\s*v\s*(?:to|->|→|-)\s*(\d+(?:\.\d+)?)\s*v?",
+            text,
+            re.IGNORECASE,
+        )
+        v_in: Optional[float] = None
+        v_out: Optional[float] = None
+        if span:
+            v_in = float(span.group(1))
+            v_out = float(span.group(2))
+        else:
+            v_in = _number(r"(\d+(?:\.\d+)?)\s*v\s*(?:in|input)")
+            v_out = _number(r"(\d+(?:\.\d+)?)\s*v\s*(?:out|output)")
+
+        # "500mA", "3A", "1.5 A"
+        current = _number(r"(\d+(?:\.\d+)?)\s*(?:a|amp|amps|ampere|amperes)\b")
+        milliamps = _number(r"(\d+(?:\.\d+)?)\s*ma\b")
+        if milliamps is not None:
+            current = milliamps / 1000.0
+
+        features: List[str] = []
+        if "led" in text_lower:
+            features.append("led_indicator")
+        if any(k in text_lower for k in ["decoupling", "bypass", "filter"]):
+            features.append("decoupling")
+
         return CircuitRequirement(
             circuit_type=circuit_type,
-            description="",
+            description=text.strip(),
             input_voltage=v_in,
             output_voltage=v_out,
             output_current=current,
+            features=features,
         )
 
 
 class CircuitSpecificationGenerator:
     """Generates detailed circuit specification from requirements."""
     
-    def __init__(self, llm_client: LLMClient, component_db=None, use_llm: bool = True):
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        component_db=None,
+        use_llm: bool = True,
+        allow_fallback: bool = True,
+    ):
         self.llm = llm_client
         self.db = component_db
         self.use_llm = use_llm
+        # When False, an LLM failure raises instead of silently producing a
+        # canned template. Callers that must not fake a design set this False.
+        self.allow_fallback = allow_fallback
+        # Bounds generation so a slow local model cannot run for many minutes
+        # on a single request.
+        self.default_max_tokens = 2048
 
     def _make_component(self, role: str, mpn: str, manufacturer: str, value: str, 
                         package: str, reasoning: str = "") -> ComponentSpec:
@@ -391,112 +446,95 @@ class CircuitSpecificationGenerator:
         "phono_preamp": {
             "topology": "Stereo RIAA Phono Preamplifier (Moving Magnet)",
             "components": [
-                # Left Channel
                 {"role": "input_jack_left", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA input"},
-                {"role": "input_capacitor_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "DC blocking capacitor, left input"},
-                {"role": "input_resistor_left", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Cartridge loading 47k ohm (MM standard)"},
-                {"role": "opamp_left_1", "mpn": "OPA2134PA", "manufacturer": "TI", "value": "Dual FET OpAmp", "package": "DIP-8", "reasoning": "Low noise, low distortion audio opamp, first gain stage"},
-                {"role": "riaa_r1_left", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA network R1 (3180µs pole)"},
-                {"role": "riaa_c1_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA network C1 (3180µs pole)"},
-                {"role": "riaa_r2_left", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA network R2 (318µs zero)"},
-                {"role": "riaa_c2_left", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA network C2 (318µs zero)"},
-                {"role": "riaa_r3_left", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA network R3 (75µs pole)"},
-                {"role": "riaa_c3_left", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA network C3 (75µs pole)"},
-                {"role": "gain_r_left", "mpn": "RC0603FR-0710KL", "manufacturer": "Yageo", "value": "10k", "package": "0603", "reasoning": "Gain setting resistor (~40dB)"},
-                {"role": "gain_rf_left", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor for gain"},
-                {"role": "output_capacitor_left", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "DC blocking output capacitor"},
-                {"role": "output_jack_left", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA output to guitar amp"},
-                
-                # Right Channel (mirror of left)
+                {"role": "input_capacitor_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Left input DC blocking capacitor"},
+                {"role": "input_resistor_left", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
+                {"role": "riaa_r1_left", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
+                {"role": "riaa_c1_left", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
+                {"role": "riaa_r2_left", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
+                {"role": "riaa_c2_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
+                {"role": "riaa_r3_left", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
+                {"role": "riaa_c3_left", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
+                {"role": "gain_rf_left", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
+                {"role": "output_capacitor_left", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "Left output DC blocking capacitor"},
+                {"role": "output_jack_left", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA output"},
                 {"role": "input_jack_right", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA input"},
-                {"role": "input_capacitor_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "DC blocking capacitor, right input"},
-                {"role": "input_resistor_right", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Cartridge loading 47k ohm (MM standard)"},
-                {"role": "opamp_right_1", "mpn": "OPA2134PA", "manufacturer": "TI", "value": "Dual FET OpAmp", "package": "DIP-8", "reasoning": "Low noise, low distortion audio opamp, first gain stage (shared dual)"},
-                {"role": "riaa_r1_right", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA network R1"},
-                {"role": "riaa_c1_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA network C1"},
-                {"role": "riaa_r2_right", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA network R2"},
-                {"role": "riaa_c2_right", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA network C2"},
-                {"role": "riaa_r3_right", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA network R3"},
-                {"role": "riaa_c3_right", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA network C3"},
-                {"role": "gain_r_right", "mpn": "RC0603FR-0710KL", "manufacturer": "Yageo", "value": "10k", "package": "0603", "reasoning": "Gain setting resistor"},
-                {"role": "gain_rf_right", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor for gain"},
-                {"role": "output_capacitor_right", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "DC blocking output capacitor"},
-                {"role": "output_jack_right", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA output to guitar amp"},
-                
-                # Power Supply
-                {"role": "dc_jack", "mpn": "PJ-002AH", "manufacturer": "CUI Devices", "value": "DC Jack", "package": "PTH", "reasoning": "12V DC adapter input"},
-                {"role": "battery_clip", "mpn": "9V_CLIP", "manufacturer": "Keystone", "value": "9V Battery Clip", "package": "PTH", "reasoning": "9V battery backup option"},
-                {"role": "power_switch", "mpn": "GT21MCBE", "manufacturer": "C&K", "value": "DPDT Switch", "package": "PTH", "reasoning": "Power on/off switch"},
-                {"role": "regulator_pos", "mpn": "LM317L", "manufacturer": "TI", "value": "Adj. Regulator", "package": "TO-92", "reasoning": "Positive rail regulator (+15V)"},
-                {"role": "regulator_neg", "mpn": "LM337L", "manufacturer": "TI", "value": "Adj. Regulator", "package": "TO-92", "reasoning": "Negative rail regulator (-15V)"},
-                {"role": "vref_diode", "mpn": "TL431", "manufacturer": "TI", "value": "Shunt Regulator", "package": "TO-92", "reasoning": "Virtual ground reference (+/- 7.5V from single supply)"},
-                {"role": "psu_cap_large", "mpn": "EEU-FC1E470", "manufacturer": "Panasonic", "value": "470uF/25V", "package": "Radial", "reasoning": "Main supply filtering"},
-                {"role": "psu_cap_small", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "High frequency bypass"},
+                {"role": "input_capacitor_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Right input DC blocking capacitor"},
+                {"role": "input_resistor_right", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
+                {"role": "riaa_r1_right", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
+                {"role": "riaa_c1_right", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
+                {"role": "riaa_r2_right", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
+                {"role": "riaa_c2_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
+                {"role": "riaa_r3_right", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
+                {"role": "riaa_c3_right", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
+                {"role": "gain_rf_right", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
+                {"role": "output_capacitor_right", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "Right output DC blocking capacitor"},
+                {"role": "output_jack_right", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA output"},
+                {"role": "opamp", "mpn": "OPA2134PA", "manufacturer": "TI", "value": "OPA2134", "package": "DIP-8", "reasoning": "Dual low-noise audio op-amp, one unit per channel"},
+                {"role": "psu_cap_large", "mpn": "EEU-FC1E470", "manufacturer": "Panasonic", "value": "470uF/25V", "package": "Radial", "reasoning": "Supply bulk filtering capacitor"},
+                {"role": "psu_cap_small", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Op-amp supply bypass capacitor"},
+                {"role": "regulator_adj_resistor", "mpn": "RC0603FR-07240RL", "manufacturer": "Yageo", "value": "240", "package": "0603", "reasoning": "LM317 adjustment resistor"},
+                {"role": "regulator_pos", "mpn": "LM317L", "manufacturer": "TI", "value": "Adjustable", "package": "TO-92", "reasoning": "Positive 15V rail regulator"},
+                {"role": "regulator_neg_adj", "mpn": "RC0603FR-07240RL", "manufacturer": "Yageo", "value": "240", "package": "0603", "reasoning": "LM337 adjustment resistor"},
+                {"role": "dc_jack", "mpn": "PJ-002AH", "manufacturer": "CUI Devices", "value": "DC Jack", "package": "PTH", "reasoning": "12V DC input jack"},
+                {"role": "power_switch", "mpn": "GT21MCBE", "manufacturer": "C&K", "value": "DPDT", "package": "PTH", "reasoning": "Power on/off switch"},
+                {"role": "battery_clip", "mpn": "9V_CLIP", "manufacturer": "Keystone", "value": "9V Battery Clip", "package": "PTH", "reasoning": "Optional 9V battery input"},
             ],
             "connections": [
-                # Left channel signal path
-                {"from": "input_jack_left", "to": "input_capacitor_left", "net": "L_IN_RCA"},
-                {"from": "input_capacitor_left", "to": "input_resistor_left", "net": "L_IN_SIG"},
-                {"from": "input_resistor_left", "to": "GND", "net": "GND"},
-                {"from": "input_resistor_left", "to": "opamp_left_1", "net": "L_IN_OPAMP"},
-                # RIAA network left (simplified - actual is feedback network around opamp)
-                {"from": "opamp_left_1", "to": "riaa_r1_left", "net": "L_RIAA_R1"},
-                {"from": "riaa_r1_left", "to": "riaa_c1_left", "net": "L_RIAA_C1"},
-                {"from": "riaa_c1_left", "to": "GND", "net": "GND"},
-                {"from": "opamp_left_1", "to": "gain_rf_left", "net": "L_FB"},
-                {"from": "gain_rf_left", "to": "gain_r_left", "net": "L_FB_NET"},
-                {"from": "gain_r_left", "to": "GND", "net": "GND"},
-                {"from": "opamp_left_1", "to": "output_capacitor_left", "net": "L_OUT_OPAMP"},
-                {"from": "output_capacitor_left", "to": "output_jack_left", "net": "L_OUT_RCA"},
-                
-                # Right channel signal path (mirror)
-                {"from": "input_jack_right", "to": "input_capacitor_right", "net": "R_IN_RCA"},
-                {"from": "input_capacitor_right", "to": "input_resistor_right", "net": "R_IN_SIG"},
-                {"from": "input_resistor_right", "to": "GND", "net": "GND"},
-                {"from": "input_resistor_right", "to": "opamp_right_1", "net": "R_IN_OPAMP"},
-                {"from": "opamp_right_1", "to": "riaa_r1_right", "net": "R_RIAA_R1"},
-                {"from": "riaa_r1_right", "to": "riaa_c1_right", "net": "R_RIAA_C1"},
-                {"from": "riaa_c1_right", "to": "GND", "net": "GND"},
-                {"from": "opamp_right_1", "to": "gain_rf_right", "net": "R_FB"},
-                {"from": "gain_rf_right", "to": "gain_r_right", "net": "R_FB_NET"},
-                {"from": "gain_r_right", "to": "GND", "net": "GND"},
-                {"from": "opamp_right_1", "to": "output_capacitor_right", "net": "R_OUT_OPAMP"},
-                {"from": "output_capacitor_right", "to": "output_jack_right", "net": "R_OUT_RCA"},
-                
-                # Power supply
-                {"from": "dc_jack", "to": "power_switch", "net": "VIN_RAW"},
-                {"from": "battery_clip", "to": "power_switch", "net": "VIN_BATT"},
-                {"from": "power_switch", "to": "regulator_pos", "net": "VIN_REG"},
-                {"from": "power_switch", "to": "regulator_neg", "net": "VIN_REG_NEG"},
-                {"from": "regulator_pos", "to": "vref_diode", "net": "V_POS"},
-                {"from": "regulator_neg", "to": "vref_diode", "net": "V_NEG"},
-                {"from": "vref_diode", "to": "GND", "net": "VGND"},
-                {"from": "vref_diode", "to": "opamp_left_1", "net": "VGND_REF"},
-                {"from": "vref_diode", "to": "opamp_right_1", "net": "VGND_REF"},
-                {"from": "psu_cap_large", "to": "GND", "net": "V_POS"},
-                {"from": "psu_cap_large", "to": "VGND", "net": "VGND"},
-                {"from": "psu_cap_large", "to": "GND", "net": "V_NEG"},
+                {"from": "input_jack_left.1", "to": "input_capacitor_left.1", "net": "L_IN"},
+                {"from": "input_capacitor_left.2", "to": "input_resistor_left.1", "net": "L_SIG"},
+                {"from": "input_resistor_left.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "input_capacitor_left.2", "to": "opamp.3", "net": "L_SIG"},
+                {"from": "opamp.1", "to": "output_capacitor_left.1", "net": "L_OUT_AMP"},
+                {"from": "output_capacitor_left.2", "to": "output_jack_left.1", "net": "L_OUT"},
+                {"from": "output_jack_left.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "opamp.2", "to": "riaa_r1_left.2", "net": "L_FB"},
+                {"from": "riaa_r1_left.1", "to": "riaa_c1_left.1", "net": "L_RIAA_A"},
+                {"from": "riaa_c1_left.2", "to": "riaa_r2_left.1", "net": "L_RIAA_B"},
+                {"from": "riaa_r2_left.2", "to": "riaa_c2_left.1", "net": "L_RIAA_C"},
+                {"from": "riaa_c2_left.2", "to": "riaa_r3_left.1", "net": "L_RIAA_D"},
+                {"from": "riaa_r3_left.2", "to": "riaa_c3_left.1", "net": "L_RIAA_E"},
+                {"from": "riaa_c3_left.2", "to": "gain_rf_left.1", "net": "L_RIAA_F"},
+                {"from": "gain_rf_left.2", "to": "opamp.1", "net": "L_OUT_AMP"},
+                {"from": "input_jack_right.1", "to": "input_capacitor_right.1", "net": "R_IN"},
+                {"from": "input_capacitor_right.2", "to": "input_resistor_right.1", "net": "R_SIG"},
+                {"from": "input_resistor_right.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "input_capacitor_right.2", "to": "opamp.5", "net": "R_SIG"},
+                {"from": "opamp.7", "to": "output_capacitor_right.1", "net": "R_OUT_AMP"},
+                {"from": "output_capacitor_right.2", "to": "output_jack_right.1", "net": "R_OUT"},
+                {"from": "output_jack_right.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "opamp.6", "to": "riaa_r1_right.2", "net": "R_FB"},
+                {"from": "riaa_r1_right.1", "to": "riaa_c1_right.1", "net": "R_RIAA_A"},
+                {"from": "riaa_c1_right.2", "to": "riaa_r2_right.1", "net": "R_RIAA_B"},
+                {"from": "riaa_r2_right.2", "to": "riaa_c2_right.1", "net": "R_RIAA_C"},
+                {"from": "riaa_c2_right.2", "to": "riaa_r3_right.1", "net": "R_RIAA_D"},
+                {"from": "riaa_r3_right.2", "to": "riaa_c3_right.1", "net": "R_RIAA_E"},
+                {"from": "riaa_c3_right.2", "to": "gain_rf_right.1", "net": "R_RIAA_F"},
+                {"from": "gain_rf_right.2", "to": "opamp.7", "net": "R_OUT_AMP"},
+                {"from": "dc_jack.1", "to": "power_switch.1", "net": "VRAW"},
+                {"from": "battery_clip.1", "to": "power_switch.1", "net": "VRAW"},
+                {"from": "power_switch.2", "to": "regulator_pos.VI", "net": "VRAW"},
+                {"from": "psu_cap_large.1", "to": "regulator_pos.VI", "net": "VRAW"},
+                {"from": "regulator_pos.ADJ", "to": "regulator_adj_resistor.1", "net": "VCC_ADJ"},
+                {"from": "regulator_adj_resistor.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "regulator_pos.VO", "to": "regulator_pos.ADJ", "net": "VCC"},
+                {"from": "opamp.8", "to": "regulator_pos.VO", "net": "VCC"},
+                {"from": "psu_cap_small.1", "to": "regulator_pos.VO", "net": "VCC"},
+                {"from": "psu_cap_small.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "opamp.4", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "dc_jack.2", "to": "psu_cap_large.2", "net": "GND"},
+                {"from": "battery_clip.2", "to": "psu_cap_large.2", "net": "GND"},
             ],
-            "power_domains": {"V_POS": 15.0, "VGND": 0.0, "V_NEG": -15.0, "VIN": 12.0, "VBATT": 9.0},
+            "power_domains": {"VCC": 15.0, "VRAW": 12.0, "GND": 0.0},
             "design_notes": [
-                "RIAA equalization: 3180µs (50Hz) pole, 318µs (500Hz) zero, 75µs (2120Hz) pole",
-                "Total gain ~40dB (100x) at 1kHz for MM cartridge (~5mV -> 500mV)",
-                "OPA2134: Low noise (8nV/√Hz), low distortion (0.0003%), FET input",
-                "Virtual ground (VGND) at 1/2 supply for single-supply operation",
-                "Input impedance: 47k || 100pF (standard MM loading)",
-                "Output impedance: <100 ohm, suitable for guitar amp high-Z input",
-                "Power: 9V battery (portable) or 12V DC adapter (wall wart)",
-                "Regulated +/-15V rails for maximum headroom and low noise",
-                "DC blocking caps on all inputs/outputs prevent DC offset issues"
+                "Passive RIAA equalisation around a single non-inverting gain stage per channel",
+                "Use 1% metal-film resistors and C0G/NP0 capacitors in the RIAA network",
+                "Keep the RIAA network close to the op-amp pins to minimise noise pickup",
+                "Star ground: separate signal ground from power ground",
+                "Verify the RIAA curve within +/-1dB from 20Hz to 20kHz"
             ],
             "warnings": [
-                "Use metal-film resistors in RIAA network for accuracy (1% tolerance)",
-                "Use C0G/NP0 capacitors in RIAA network for stability",
-                "Keep RIAA network components close to opamp pins to minimize noise pickup",
-                "Star ground layout critical: separate signal ground from power ground",
-                "Shield RCA cables and keep away from power supply traces",
-                "Test with oscilloscope: verify RIAA curve within ±1dB 20Hz-20kHz",
-                "Guitar amp input impedance ~1M ohm - our <100 ohm output is fine"
+                "Replace the DC jack and battery clip with the supply the user actually has"
             ]
         }
     }
@@ -540,14 +578,28 @@ class CircuitSpecificationGenerator:
     }
 
     async def generate(self, requirements: CircuitRequirement) -> CircuitSpecification:
-        """Generate detailed circuit specification from requirements."""
+        """
+        Generate a circuit specification, preferring the LLM.
+
+        When the LLM fails, the rule-based generator is used only if
+        ``allow_fallback`` is enabled, and the substitution is recorded on the
+        returned specification so callers never mistake a canned template for
+        an AI-generated design.
+        """
         if self.use_llm:
             try:
                 return await self._generate_with_llm(requirements)
             except Exception as e:
-                logger.warning(f"LLM generation failed, falling back to rule-based: {e}")
-        
-        # Fallback to rule-based generation
+                if not self.allow_fallback:
+                    raise
+                logger.warning(
+                    "LLM generation failed (%s: %s); falling back to the rule-based "
+                    "template generator",
+                    type(e).__name__,
+                    e,
+                )
+
+        # Rule-based template generation.
         spec_dict = self._generate_spec(requirements)
         return CircuitSpecification(
             requirements=requirements,
@@ -557,81 +609,341 @@ class CircuitSpecificationGenerator:
             power_domains=spec_dict.get("power_domains", {}),
             design_notes=spec_dict.get("design_notes", []),
             warnings=spec_dict.get("warnings", []),
+            used_llm=False,
         )
+
+    async def generate_validated(
+        self,
+        requirements: CircuitRequirement,
+        max_repairs: int = 2,
+        description: str = "",
+        max_tokens: Optional[int] = None,
+    ) -> tuple[CircuitSpecification, Optional[CircuitIR], DesignValidationReport]:
+        """
+        Generate, physically build, validate, and repair a circuit.
+
+        This is the path that actually guarantees a usable design:
+
+        1. ask the LLM for a specification
+        2. build a Circuit IR (real MPNs, real pins, real footprints)
+        3. run ERC and structural validation
+        4. if there are errors, hand the model the exact problems and retry
+
+        Returns the best specification, its Circuit IR, and the final report.
+        """
+        if max_tokens is None:
+            max_tokens = self.default_max_tokens
+
+        validator = DesignValidator(self.db)
+        best: Optional[DesignValidationReport] = None
+        attempts = 0
+        used_llm = False
+
+        spec_dict, used_llm = await self._generate_spec_dict(requirements, max_tokens)
+
+        for attempt in range(max_repairs + 1):
+            attempts = attempt + 1
+            report = validator.validate(
+                spec_dict, requirements=requirements, description=description
+            )
+            if best is None or _report_score(report) > _report_score(best):
+                best = report
+
+            if report.valid:
+                break
+
+            if attempt >= max_repairs:
+                logger.warning(
+                    "Circuit still has %d error(s) after %d attempt(s)",
+                    len(report.errors),
+                    attempts,
+                )
+                break
+
+            logger.info(
+                "Repairing circuit (attempt %d/%d): %d error(s)",
+                attempt + 1,
+                max_repairs + 1,
+                len(report.errors),
+            )
+            spec_dict = await self._repair_spec(
+                requirements, spec_dict, report.feedback(), max_tokens
+            )
+
+        assert best is not None  # loop always runs at least once
+
+        spec = self._spec_from_dict(requirements, spec_dict)
+        spec.used_llm = used_llm
+        spec.repair_attempts = attempts - 1
+        spec.validation = best.to_dict()
+        if best.build_report is not None:
+            # Surface substitution / inference notes to the caller.
+            spec.warnings = list(spec.warnings) + list(best.build_report.notes)
+        return spec, best.circuit, best
+
+    async def _generate_spec_dict(
+        self, requirements: CircuitRequirement, max_tokens: int = 2048
+    ) -> tuple[Dict[str, Any], bool]:
+        """Ask the LLM for a raw specification dict.
+
+        Returns the specification and whether it actually came from the LLM.
+        """
+        if self.use_llm:
+            try:
+                spec_dict = await self._request_spec_dict(
+                    requirements, max_tokens=max_tokens
+                )
+                if not spec_dict.get("components"):
+                    raise LLMResponseError(
+                        "LLM returned a specification with no components; "
+                        f"keys received: {sorted(spec_dict.keys())}"
+                    )
+                return spec_dict, True
+            except Exception as e:
+                if not self.allow_fallback:
+                    raise
+                logger.warning(
+                    "LLM specification generation failed (%s: %s); using the "
+                    "rule-based template generator",
+                    type(e).__name__,
+                    e,
+                )
+        return self._generate_spec(requirements), False
+
+    def _spec_from_dict(
+        self, requirements: CircuitRequirement, spec_dict: Dict[str, Any]
+    ) -> CircuitSpecification:
+        """Convert a raw specification dict into a CircuitSpecification."""
+        components = []
+        for comp in spec_dict.get("components", []) or []:
+            if isinstance(comp, ComponentSpec):
+                components.append(comp)
+            elif isinstance(comp, dict):
+                components.append(
+                    ComponentSpec(
+                        role=comp.get("role", ""),
+                        mpn=comp.get("mpn", ""),
+                        manufacturer=comp.get("manufacturer", ""),
+                        value=comp.get("value", ""),
+                        package=comp.get("package", ""),
+                        reasoning=comp.get("reasoning", ""),
+                    )
+                )
+        return CircuitSpecification(
+            requirements=requirements,
+            topology=spec_dict.get("topology", ""),
+            components=components,
+            connections=spec_dict.get("connections", []) or [],
+            power_domains=spec_dict.get("power_domains", {}) or {},
+            design_notes=spec_dict.get("design_notes", []) or [],
+            warnings=spec_dict.get("warnings", []) or [],
+        )
+
+    async def _request_spec_dict(
+        self,
+        requirements: CircuitRequirement,
+        feedback: str = "",
+        previous_spec: Optional[Dict[str, Any]] = None,
+        max_tokens: int = 2048,
+    ) -> Dict[str, Any]:
+        """Make one specification request to the LLM.
+
+        ``max_tokens`` bounds generation so a chatty local model cannot run for
+        many minutes on a single request.
+        """
+        result = await self.llm.complete_structured(
+            messages=self._build_spec_messages(
+                requirements, feedback=feedback, previous_spec=previous_spec
+            ),
+            response_schema=self.SPEC_SCHEMA,
+            max_tokens=max_tokens,
+        )
+        if not isinstance(result, dict):
+            raise LLMResponseError(
+                f"Expected a JSON object from the LLM, got {type(result).__name__}"
+            )
+        return result
+
+    async def _repair_spec(
+        self,
+        requirements: CircuitRequirement,
+        spec_dict: Dict[str, Any],
+        feedback: str,
+        max_tokens: int = 2048,
+    ) -> Dict[str, Any]:
+        """Ask the LLM to fix specific, machine-detected problems."""
+        try:
+            repaired = await self._request_spec_dict(
+                requirements,
+                feedback=feedback,
+                previous_spec=spec_dict,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            logger.warning(
+                "Repair attempt failed (%s: %s); keeping previous spec",
+                type(e).__name__,
+                e,
+            )
+            return spec_dict
+
+        if not repaired.get("components"):
+            logger.warning("Repair returned no components; keeping previous spec")
+            return spec_dict
+        return repaired
+
+    def _build_spec_messages(
+        self,
+        requirements: CircuitRequirement,
+        feedback: str = "",
+        previous_spec: Optional[Dict[str, Any]] = None,
+    ) -> List[LLMMessage]:
+        """Build the system+user messages for specification generation."""
+        example_text = self._few_shot_example(requirements.circuit_type)
+
+        catalog_hint = self._catalog_hint(requirements)
+
+        system_prompt = (
+            "You are an expert electronics engineer. Produce a circuit "
+            "specification as JSON.\n\n"
+            "Requirements for your answer:\n"
+            "- topology: a short topology name, e.g. \"LDO Linear Regulator\".\n"
+            "- components: every part needed, each with role, mpn, manufacturer, "
+            "value, package, and reasoning. Use only real manufacturer part "
+            "numbers, and prefer the catalog parts listed below.\n"
+            "- connections: every electrical connection, each as "
+            "{\"from\": \"<ref>.<pin>\", \"to\": \"<ref>.<pin>\", \"net\": \"<NET>\"}. "
+            "Use the reference designators you assigned (U1, C1, R1, D1, ...). "
+            "Every pin you name must exist on that part.\n"
+            "- power_domains: each rail with its voltage.\n"
+            "- design_notes and warnings: free text.\n\n"
+            "Electrical rules you must follow:\n"
+            "- Every power input pin must be connected to a power or ground net.\n"
+            "- Every regulator or IC needs input and output decoupling capacitors.\n"
+            "- Every LED needs a series current-limiting resistor.\n"
+            "- Every net must have at least two pin connections.\n"
+            "- Do not invent pin numbers or part numbers.\n"
+            f"{catalog_hint}\n"
+            f"Example for {requirements.circuit_type}:\n{example_text}"
+        )
+
+        req_context = (
+            f"Circuit Type: {requirements.circuit_type}\n"
+            f"Description: {requirements.description}\n"
+            f"Input Voltage: {requirements.input_voltage}V\n"
+            f"Output Voltage: {requirements.output_voltage}V\n"
+            f"Output Current: {requirements.output_current}A\n"
+            f"Features: {requirements.features}\n"
+            f"Constraints: {requirements.constraints}"
+        )
+
+        user_prompt = f"Generate a detailed circuit specification for:\n{req_context}"
+
+        if feedback:
+            previous = self._compact_render(previous_spec)
+            user_prompt += (
+                "\n\nThe previous attempt was invalid. Fix exactly these problems "
+                "and return the complete corrected specification:\n"
+                f"{feedback}\n"
+            )
+            if previous:
+                user_prompt += f"Previous components were: {previous}\n"
+            user_prompt += (
+                "Return every component and every connection again, not just the "
+                "changed ones."
+            )
+
+        return [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(role="user", content=user_prompt),
+        ]
+
+    # Local models on CPU spend real time reading the prompt, so a huge
+    # few-shot example is a latency cost with little accuracy benefit.
+    _MAX_EXAMPLE_CHARS = 2600
+
+    def _few_shot_example(self, circuit_type: str) -> str:
+        """Render the few-shot example, trimmed for prompt economy."""
+        example = self.SPEC_EXAMPLES.get(circuit_type)
+        if not example:
+            return "No example available for this circuit type."
+
+        text = json.dumps(example, separators=(",", ":"))
+        if len(text) <= self._MAX_EXAMPLE_CHARS:
+            return text
+
+        # Keep the first components and the connections, which carry the shape.
+        trimmed = {
+            key: value
+            for key, value in example.items()
+            if key in ("topology", "connections", "power_domains")
+        }
+        components = example.get("components") or []
+        trimmed["components"] = components[:6]
+        trimmed["design_notes"] = (example.get("design_notes") or [])[:2]
+        return json.dumps(trimmed, separators=(",", ":"))
+
+    def _catalog_hint(self, requirements: CircuitRequirement) -> str:
+        """Render a short list of real catalog parts to ground the model."""
+        if self.db is None:
+            return ""
+        wanted = {
+            "ldo_regulator": ["regulator_ldo"],
+            "buck_converter": ["regulator_buck"],
+            "boost_converter": ["regulator_boost"],
+            "led_driver": ["led", "resistor"],
+        }.get(requirements.circuit_type, [])
+
+        lines: List[str] = []
+        for category in wanted + ["capacitor", "resistor"]:
+            try:
+                parts = self.db.search(category=category, limit=4)
+            except Exception:
+                parts = []
+            for part in parts:
+                lines.append(
+                    f"- {part.mpn} ({part.manufacturer}) {part.value} "
+                    f"{part.package} [{part.category}]"
+                )
+
+        if not lines:
+            return ""
+        unique = list(dict.fromkeys(lines))[:16]
+        return (
+            "\nPrefer these real catalog parts where they fit "
+            "(you may use other real MPNs when they do not):\n"
+            + "\n".join(unique)
+        )
+
+    def _compact_render(self, spec_dict: Optional[Dict[str, Any]]) -> str:
+        """Render a spec compactly (used when giving repair context)."""
+        if not spec_dict:
+            return ""
+        parts = []
+        for comp in spec_dict.get("components", []) or []:
+            if isinstance(comp, dict):
+                parts.append(
+                    f"{comp.get('role', '?')}={comp.get('mpn', '?')}"
+                )
+        return ", ".join(parts)
 
     async def _generate_with_llm(self, requirements: CircuitRequirement) -> CircuitSpecification:
         """Generate specification using LLM with structured output."""
-        # Get few-shot example for this circuit type
-        example = self.SPEC_EXAMPLES.get(requirements.circuit_type, {})
-        example_text = json.dumps(example, indent=2) if example else "No example available for this circuit type."
-        
-        system_prompt = f"""You are an expert electronics engineer. Generate a detailed circuit specification based on the requirements.
-        
-        Provide:
-        - topology: Circuit topology name (e.g., "LDO Linear Regulator", "Buck Converter", "Boost Converter")
-        - components: List of components with role, MPN, manufacturer, value, package, and reasoning
-        - connections: List of connections (from_component, to_component, net_name)
-        - power_domains: Dictionary of power domains with voltage levels
-        - design_notes: Important design considerations
-        - warnings: Any warnings or concerns
-        
-        Use real MPNs from major manufacturers (TI, Analog Devices, STMicroelectronics, Onsemi, Diodes Inc, etc.).
-        Select appropriate packages (SOT-23, SOIC-8, 0603, 0805, etc.) based on current/power requirements.
-        Include input/output capacitors, protection diodes, and indicator LEDs as appropriate.
-        
-        Example for {requirements.circuit_type}:
-        {example_text}"""
+        result = await self._request_spec_dict(requirements)
 
-        # Build context with requirements
-        req_context = f"""
-Circuit Type: {requirements.circuit_type}
-Description: {requirements.description}
-Input Voltage: {requirements.input_voltage}V
-Output Voltage: {requirements.output_voltage}V
-Output Current: {requirements.output_current}A
-Features: {requirements.features}
-Constraints: {requirements.constraints}
-"""
-
-        prompt = f"Generate a detailed circuit specification for:\n{req_context}"
-
-        try:
-            result = await self.llm.complete_structured(
-                messages=[
-                    LLMMessage(role="system", content=system_prompt),
-                    LLMMessage(role="user", content=prompt),
-                ],
-                response_schema=self.SPEC_SCHEMA
+        # Validate required fields
+        if (
+            not result.get("topology")
+            or not result.get("components")
+            or result.get("topology") == ""
+            or result.get("components") == []
+        ):
+            raise LLMResponseError(
+                "LLM response missing required fields (topology, components); "
+                f"received keys: {sorted(result.keys())}"
             )
-            
-            # Validate required fields
-            if not result.get("topology") or not result.get("components") or result.get("topology") == "" or result.get("components") == []:
-                raise ValueError("LLM response missing required fields (topology, components)")
-            
-            # Convert dict components to ComponentSpec objects
-            components = []
-            for comp_dict in result.get("components", []):
-                components.append(ComponentSpec(
-                    role=comp_dict.get("role", ""),
-                    mpn=comp_dict.get("mpn", ""),
-                    manufacturer=comp_dict.get("manufacturer", ""),
-                    value=comp_dict.get("value", ""),
-                    package=comp_dict.get("package", ""),
-                    reasoning=comp_dict.get("reasoning", "")
-                ))
-            
-            return CircuitSpecification(
-                requirements=requirements,
-                topology=result.get("topology", ""),
-                components=components,
-                connections=result.get("connections", []),
-                power_domains=result.get("power_domains", {}),
-                design_notes=result.get("design_notes", []),
-                warnings=result.get("warnings", []),
-            )
-        except Exception as e:
-            logger.error(f"LLM specification generation failed: {e}")
-            raise
+
+        return self._spec_from_dict(requirements, result)
 
     def _generate_spec(self, req: CircuitRequirement) -> Dict[str, Any]:
         """Rule-based specification generation."""
@@ -661,66 +973,74 @@ Constraints: {requirements.constraints}
         v_in = req.input_voltage or 5.0
         v_out = req.output_voltage or 3.3
         i_out = req.output_current or 0.5
-        
+
         # Select LDO
-        ldo = self._select_ldo(req.output_voltage or 3.3, req.output_current or 0.5)
+        ldo = self._select_ldo(v_out, i_out)
         caps = self._select_caps()
         led = self._select_led()
         res = self._select_resistor()
-        
+
         return {
             "topology": "linear_ldo",
             "components": [
                 self._make_component(
                     role="regulator",
-                    mpn=ldo.get("mpn", "AMS1117-3.3"),
+                    mpn=ldo["mpn"],
                     manufacturer=ldo.get("manufacturer", "AMS"),
-                    value=f"{req.output_voltage or 3.3}V",
+                    value=f"{v_out}V",
                     package=ldo.get("package", "SOT-223"),
-                    reasoning=f"LDO regulator {req.output_voltage or 3.3}V {req.output_current or 0.5}A"
+                    reasoning=f"LDO regulator {v_in}V to {v_out}V at {i_out}A",
                 ),
                 self._make_component(
                     role="input_capacitor",
-                    mpn=caps[0].get("mpn", "CC0805KRX7R9BB106"),
+                    mpn=caps[0]["mpn"],
                     manufacturer=caps[0].get("manufacturer", "Yageo"),
                     value=caps[0].get("value", "10uF"),
                     package=caps[0].get("package", "0805"),
-                    reasoning="Input decoupling capacitor"
+                    reasoning="Input decoupling capacitor",
                 ),
                 self._make_component(
                     role="output_capacitor",
-                    mpn=caps[1].get("mpn", "CC0805KRX5R7BB226"),
+                    mpn=caps[1]["mpn"],
                     manufacturer=caps[1].get("manufacturer", "Yageo"),
                     value=caps[1].get("value", "22uF"),
                     package=caps[1].get("package", "0805"),
-                    reasoning="Output stability capacitor"
+                    reasoning="Output stability capacitor",
                 ),
                 self._make_component(
                     role="led_indicator",
-                    mpn=led.get("mpn", "LTST-C190KGKT"),
+                    mpn=led["mpn"],
                     manufacturer=led.get("manufacturer", "Lite-On"),
                     value=led.get("value", "Green"),
                     package=led.get("package", "0805"),
-                    reasoning="Power-on indicator"
+                    reasoning="Power-on indicator",
                 ),
                 self._make_component(
                     role="current_limit_resistor",
-                    mpn=res.get("mpn", "RC0805FR-0710KL"),
+                    mpn=res["mpn"],
                     manufacturer=res.get("manufacturer", "Yageo"),
                     value=res.get("value", "330"),
                     package=res.get("package", "0805"),
-                    reasoning="LED current limiting resistor"
+                    reasoning="LED current limiting resistor",
                 ),
             ],
+            "connections": [
+                {"from": "U1.VIN", "to": "C1.1", "net": "VIN"},
+                {"from": "U1.VOUT", "to": "C2.1", "net": "VOUT"},
+                {"from": "U1.VOUT", "to": "R1.1", "net": "VOUT"},
+                {"from": "R1.2", "to": "D1.A", "net": "LED_A"},
+                {"from": "D1.K", "to": "C1.2", "net": "GND"},
+                {"from": "U1.GND", "to": "C2.2", "net": "GND"},
+            ],
             "design_notes": [
-                f"LDO dropout: {5.0 - 3.3}V",
-                f"Power dissipation: {(5.0 - 3.3) * 0.5:.2f}W",
-                "Ensure adequate thermal relief"
+                f"LDO dropout: {v_in - v_out:.1f}V",
+                f"Power dissipation: {(v_in - v_out) * i_out:.2f}W",
+                "Ensure adequate thermal relief",
             ],
             "warnings": [
                 "Check thermal dissipation for high current",
-                "Verify dropout voltage at max current"
-            ] if (5.0 - 3.3) * 0.5 > 0.5 else []
+                "Verify dropout voltage at max current",
+            ] if (v_in - v_out) * i_out > 0.5 else [],
         }
 
     def _select_ldo(self, v_out: float, i_out: float) -> dict:
@@ -735,15 +1055,15 @@ Constraints: {requirements.constraints}
 
     def _select_caps(self) -> List[dict]:
         return [
-            {"mpn": "C-10uF-0805", "manufacturer": "Yageo", "value": "10uF", "package": "0805"},
-            {"mpn": "C-22uF-0805", "manufacturer": "Yageo", "value": "22uF", "package": "0805"}
+            {"mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805"},
+            {"mpn": "CC0805KRX5R7BB226", "manufacturer": "Yageo", "value": "22uF", "package": "0805"}
         ]
 
     def _select_led(self) -> dict:
-        return {"mpn": "LED-GREEN-0805", "manufacturer": "Lite-On", "package": "0805"}
+        return {"mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805"}
 
     def _select_resistor(self) -> dict:
-        return {"mpn": "R-330-0805", "manufacturer": "Yageo", "value": "330", "package": "0805"}
+        return {"mpn": "RC0805FR-07330RL", "manufacturer": "Yageo", "value": "330", "package": "0805"}
 
     def _spec_buck(self, req):
         return {
@@ -755,43 +1075,56 @@ Constraints: {requirements.constraints}
                     "manufacturer": "TI",
                     "value": "5V",
                     "package": "TO-220-5",
-                    "reasoning": "Buck converter controller"
+                    "reasoning": "Buck converter controller",
                 },
                 {
                     "role": "inductor",
-                    "mpn": "SRR1280-470M",
+                    "mpn": "SRN6045-470M",
                     "manufacturer": "Bourns",
                     "value": "47uH",
-                    "package": "12x12mm",
-                    "reasoning": "Buck inductor"
+                    "package": "1210",
+                    "reasoning": "Buck inductor",
                 },
                 {
                     "role": "input_capacitor",
-                    "mpn": "C-10uF-0805",
+                    "mpn": "CC0805KRX7R9BB106",
                     "manufacturer": "Yageo",
                     "value": "10uF",
                     "package": "0805",
-                    "reasoning": "Input decoupling"
+                    "reasoning": "Input decoupling",
                 },
                 {
                     "role": "output_capacitor",
-                    "mpn": "C-100uF-1206",
+                    "mpn": "CC0805KRX5R7BB226",
                     "manufacturer": "Yageo",
-                    "value": "100uF",
-                    "package": "1206",
-                    "reasoning": "Output filtering"
+                    "value": "22uF",
+                    "package": "0805",
+                    "reasoning": "Output filtering",
                 },
                 {
                     "role": "freewheel_diode",
-                    "mpn": "SS34",
+                    "mpn": "SS14",
                     "manufacturer": "Vishay",
-                    "value": "3A/40V",
+                    "value": "1A/40V",
                     "package": "SMA",
-                    "reasoning": "Freewheeling diode"
+                    "reasoning": "Freewheeling diode",
                 },
             ],
-            "design_notes": ["Asynchronous buck converter", "Consider sync rectification for >90% efficiency"],
-            "warnings": ["Diode loss significant at high current"]
+            "connections": [
+                {"from": "U1.VIN", "to": "C1.1", "net": "VIN"},
+                {"from": "U1.OUT", "to": "L1.1", "net": "SW"},
+                {"from": "L1.2", "to": "C2.1", "net": "VOUT"},
+                {"from": "D1.K", "to": "U1.OUT", "net": "SW"},
+                {"from": "D1.A", "to": "C1.2", "net": "GND"},
+                {"from": "U1.GND", "to": "C2.2", "net": "GND"},
+                {"from": "U1.FB", "to": "C2.1", "net": "VOUT"},
+                {"from": "U1.ON", "to": "C1.2", "net": "GND"},
+            ],
+            "design_notes": [
+                "Asynchronous buck converter",
+                "Consider synchronous rectification for >90% efficiency",
+            ],
+            "warnings": ["Diode loss is significant at high current"],
         }
 
     def _spec_boost(self, req):
@@ -804,19 +1137,53 @@ Constraints: {requirements.constraints}
                     "manufacturer": "Aerosemi",
                     "value": "Adjustable",
                     "package": "SOT-23-6",
-                    "reasoning": "Boost converter IC"
+                    "reasoning": "Boost converter IC",
                 },
                 {
                     "role": "inductor",
-                    "mpn": "SRR0604-100M",
+                    "mpn": "SRN4018-100M",
                     "manufacturer": "Bourns",
                     "value": "10uH",
-                    "package": "6x6mm",
-                    "reasoning": "Boost inductor"
+                    "package": "0805",
+                    "reasoning": "Boost inductor",
+                },
+                {
+                    "role": "input_capacitor",
+                    "mpn": "CC0805KRX7R9BB106",
+                    "manufacturer": "Yageo",
+                    "value": "10uF",
+                    "package": "0805",
+                    "reasoning": "Input decoupling",
+                },
+                {
+                    "role": "output_capacitor",
+                    "mpn": "CC0805KRX5R7BB226",
+                    "manufacturer": "Yageo",
+                    "value": "22uF",
+                    "package": "0805",
+                    "reasoning": "Output filtering",
+                },
+                {
+                    "role": "freewheel_diode",
+                    "mpn": "SS14",
+                    "manufacturer": "Vishay",
+                    "value": "1A/40V",
+                    "package": "SMA",
+                    "reasoning": "Boost rectifier",
                 },
             ],
+            "connections": [
+                {"from": "U1.VIN", "to": "C1.1", "net": "VIN"},
+                {"from": "U1.SW", "to": "L1.1", "net": "SW"},
+                {"from": "D1.A", "to": "L1.2", "net": "SW"},
+                {"from": "D1.K", "to": "C2.1", "net": "VOUT"},
+                {"from": "U1.GND", "to": "C1.2", "net": "GND"},
+                {"from": "C2.2", "to": "C1.2", "net": "GND"},
+                {"from": "U1.FB", "to": "C2.1", "net": "VOUT"},
+                {"from": "U1.EN", "to": "C1.1", "net": "VIN"},
+            ],
             "design_notes": ["Boost converter for voltage step-up"],
-            "warnings": ["Output current limited by inductor saturation"]
+            "warnings": ["Output current is limited by inductor saturation"],
         }
 
     def _spec_led(self, req):
@@ -829,19 +1196,23 @@ Constraints: {requirements.constraints}
                     "manufacturer": "Lite-On",
                     "value": "Green",
                     "package": "0805",
-                    "reasoning": "Green indicator LED"
+                    "reasoning": "Green indicator LED",
                 },
                 {
                     "role": "current_limit_resistor",
-                    "mpn": "RC0805FR-0710KL",
+                    "mpn": "RC0805FR-07330RL",
                     "manufacturer": "Yageo",
-                    "value": "10k",
+                    "value": "330",
                     "package": "0805",
-                    "reasoning": "Current limiting resistor"
-                }
+                    "reasoning": "Current limiting resistor",
+                },
+            ],
+            "connections": [
+                {"from": "R1.1", "to": "D1.A", "net": "LED_A"},
+                {"from": "R1.2", "to": "D1.K", "net": "LED_K"},
             ],
             "design_notes": ["Simple series resistor LED driver"],
-            "warnings": ["Not suitable for high-power LEDs"]
+            "warnings": ["Not suitable for high-power LEDs"],
         }
 
     def _spec_phono_preamp(self, req):
@@ -859,42 +1230,103 @@ Constraints: {requirements.constraints}
 
 class NLToCircuitPipeline:
     """End-to-end pipeline: Natural Language -> CircuitIR -> KiCad."""
-    
+
     def __init__(
         self,
         llm_client: Optional[Any] = None,
         component_db: Optional[Any] = None,
+        allow_fallback: bool = True,
+        max_repairs: int = 2,
     ):
         """Initialize pipeline with optional LLM client and component database.
-        
+
         Args:
             llm_client: LLM client instance. If None, uses mock client.
-            component_db: Optional component database for part selection.
+            component_db: Component database for part resolution. Defaults to
+                the standard database so MPNs resolve to real catalog parts.
+            allow_fallback: When False, an LLM failure raises instead of
+                silently substituting the rule-based template generator.
+            max_repairs: How many times a physically invalid design is sent back
+                to the model with specific error feedback.
         """
         if llm_client is None:
             llm_client = create_llm_client("mock")
-        
+
         self.llm_client = llm_client
+        self.max_repairs = max_repairs
+        self.allow_fallback = allow_fallback
+        self.db = component_db if component_db is not None else ComponentDatabase()
+
         self.parser = RequirementParser(llm_client)
-        self.spec_generator = CircuitSpecificationGenerator(llm_client, None)
+        self.spec_generator = CircuitSpecificationGenerator(
+            llm_client, self.db, allow_fallback=allow_fallback
+        )
+        self.builder = CircuitIRBuilder(self.db)
+        self.validator = DesignValidator(self.db)
         self.orchestrator = None
-    
+        # Populated by the most recent pipeline run, for callers that want the
+        # full validation detail alongside the Circuit IR.
+        self.last_validation: Optional[DesignValidationReport] = None
+
     def set_orchestrator(self, orchestrator: Any) -> None:
         """Set the orchestrator for this pipeline."""
         self.orchestrator = orchestrator
-    
+
+    @staticmethod
+    def _require_valid_design(
+        circuit: Optional[CircuitIR], report: DesignValidationReport
+    ) -> None:
+        """
+        Fail loudly when a design is missing or violates the electrical rules.
+
+        Returning a design that does not pass ERC would hand the user a board
+        that cannot work, so an unusable result is an error, not a warning.
+        """
+        if circuit is None:
+            raise RuntimeError(
+                "Design could not be built from the generated specification: "
+                + "; ".join(i.message for i in report.errors[:3])
+            )
+
+        if not report.valid:
+            details = "; ".join(i.message for i in report.errors[:3])
+            raise RuntimeError(
+                f"Generated design failed validation with "
+                f"{len(report.errors)} error(s): {details}"
+            )
+
     async def nl_to_circuit_spec(self, prompt: str) -> CircuitSpecification:
-        """Process natural language prompt through full pipeline to circuit spec."""
-        # Step 1: Parse requirements
+        """
+        Process a natural language prompt into a validated circuit specification.
+
+        The returned specification carries a ``validation`` payload and its
+        ``requirements``; the built Circuit IR is available on the pipeline as
+        ``last_validation.circuit`` and via :meth:`nl_to_circuit_ir`.
+        """
         requirements = await self.parser.parse(prompt)
-        
-        # Step 2: Generate specification
-        spec = await self.spec_generator.generate(requirements)
-        
-        # Step 3: Generate CircuitIR (simplified - would use spec to build CircuitIR)
-        self._spec_to_circuit_ir(requirements)
-        
+        spec, circuit, report = await self.spec_generator.generate_validated(
+            requirements,
+            max_repairs=self.max_repairs,
+            description=requirements.description or prompt,
+        )
+        self.last_validation = report
+
+        self._require_valid_design(circuit, report)
+
         return spec
+
+    async def nl_to_circuit_ir(self, prompt: str) -> CircuitIR:
+        """Process a natural language prompt into a built, validated Circuit IR."""
+        requirements = await self.parser.parse(prompt)
+        spec, circuit, report = await self.spec_generator.generate_validated(
+            requirements,
+            max_repairs=self.max_repairs,
+            description=requirements.description or prompt,
+        )
+        self.last_validation = report
+
+        self._require_valid_design(circuit, report)
+        return circuit
     
     async def process(
         self,
@@ -910,862 +1342,87 @@ class NLToCircuitPipeline:
             output_dir: Optional output directory for generated files
             
         Returns:
-            Dictionary with requirements, specification, circuit_ir, and generated files
+            Dictionary with requirements, specification, circuit_ir, validation,
+            and generated files
         """
         # Step 1: Parse requirements
         requirements = await self.parser.parse(prompt)
-        
-        # Step 2: Generate specification
-        spec = await self.spec_generator.generate(requirements)
-        
-        # Step 3: Generate CircuitIR (simplified - would use spec to build CircuitIR)
-        circuit_ir = self._spec_to_circuit_ir(requirements)
-        
-        return {
+
+        # Step 2+3: Generate the specification, build the Circuit IR, validate it,
+        # and repair it if the electrical rules fail.
+        spec, circuit_ir, report = await self.spec_generator.generate_validated(
+            requirements,
+            max_repairs=self.max_repairs,
+            description=requirements.description or prompt,
+        )
+        self.last_validation = report
+
+        if circuit_ir is None:
+            raise RuntimeError(
+                "Design could not be built from the generated specification: "
+                + "; ".join(i.message for i in report.errors[:3])
+            )
+
+        result: Dict[str, Any] = {
             "requirements": requirements,
             "specification": spec,
             "circuit_ir": circuit_ir,
+            "validation": report,
+            "valid": report.valid,
         }
+
+        # Step 4: optionally emit KiCad project files.
+        if output_dir is not None:
+            result["files"] = self._export(circuit_ir, Path(output_dir), project_name)
+
+        return result
+
+    def _export(
+        self, circuit_ir: CircuitIR, output_dir: Path, project_name: str
+    ) -> Dict[str, Path]:
+        """Write the Circuit IR out as a KiCad project."""
+        from src.generators.kicad_generator import KiCadGenerator
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return KiCadGenerator(circuit_ir).export_project(output_dir, project_name)
     
     def _spec_to_dict(self, spec: Dict[str, Any]) -> Dict[str, Any]:
         """Convert specification to dictionary for serialization."""
         return spec
     
-    def _spec_to_circuit_ir(self, requirements: CircuitRequirement) -> 'CircuitIR':
-        """Convert requirements to CircuitIR based on circuit type."""
-        from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
-        from src.components.database import ComponentDatabase
-        
-        db = ComponentDatabase()
-        circuit = CircuitIR(name=f"Generated {requirements.circuit_type.replace('_', ' ').title()}")
-        
-        # LDO Regulator Pattern
-        if requirements.circuit_type == "ldo_regulator":
-            # Fetch parts from DB
-            ldo_spec = db.get_by_mpn("AMS1117-3.3") or db.search(category="regulator_ldo")[0]
-            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
-            c_out_spec = db.get_by_mpn("C-22uF-0805") or db.search(category="capacitor")[0]
-            res_spec = db.get_by_mpn("R-330-0805") or db.search(category="resistor")[0]
-            led_spec = db.get_by_mpn("LED-GREEN-0805") or db.search(category="led")[0]
+    def _spec_to_circuit_ir(self, requirements: CircuitRequirement) -> CircuitIR:
+        """
+        Build a Circuit IR from a requirement using the validated builder path.
 
-            # LDO Regulator U1
-            u1 = Component(
-                ref="U1",
-                value=ldo_spec.value,
-                component_type=ComponentType.REGULATOR_LDO,
-                footprint=ldo_spec.footprint,
-                symbol=ldo_spec.symbol,
-                mpn=ldo_spec.mpn,
-                manufacturer=ldo_spec.manufacturer,
-                description=ldo_spec.description,
-            )
-            u1.add_pin("1", "GND", PinType.POWER_IN)
-            u1.add_pin("2", "VOUT", PinType.POWER_OUT)
-            u1.add_pin("3", "VIN", PinType.POWER_IN)
-            circuit.add_component(u1)
-
-            # Input Capacitor C1
-            c1 = Component(
-                ref="C1",
-                value=c_in_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_in_spec.footprint,
-                symbol=c_in_spec.symbol,
-                mpn=c_in_spec.mpn,
-            )
-            c1.add_pin("1", "1", PinType.PASSIVE)
-            c1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c1)
-
-            # Output Capacitor C2
-            c2 = Component(
-                ref="C2",
-                value=c_out_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_out_spec.footprint,
-                symbol=c_out_spec.symbol,
-                mpn=c_out_spec.mpn,
-            )
-            c2.add_pin("1", "1", PinType.PASSIVE)
-            c2.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c2)
-
-            # Indicator LED D1
-            d1 = Component(
-                ref="D1",
-                value=led_spec.value,
-                component_type=ComponentType.LED,
-                footprint=led_spec.footprint,
-                symbol=led_spec.symbol,
-                mpn=led_spec.mpn,
-            )
-            d1.add_pin("1", "K", PinType.PASSIVE)
-            d1.add_pin("2", "A", PinType.PASSIVE)
-            circuit.add_component(d1)
-
-            # Current Limiting Resistor R1
-            r1 = Component(
-                ref="R1",
-                value=res_spec.value,
-                component_type=ComponentType.RESISTOR,
-                footprint=res_spec.footprint,
-                symbol=res_spec.symbol,
-                mpn=res_spec.mpn,
-            )
-            r1.add_pin("1", "1", PinType.PASSIVE)
-            r1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r1)
-
-            # Nets
-            circuit.connect("U1", "3", "VIN")      # VIN
-            circuit.connect("U1", "2", "VOUT")     # VOUT
-            circuit.connect("U1", "1", "GND")      # GND
-            circuit.connect("C1", "1", "VIN")
-            circuit.connect("C1", "2", "GND")
-            circuit.connect("C2", "1", "VOUT")
-            circuit.connect("C2", "2", "GND")
-            circuit.connect("R1", "1", "VOUT")
-            circuit.connect("R1", "2", "D1_A")
-            circuit.connect("D1", "A", "D1_A")
-            circuit.connect("D1", "K", "GND")
-        
-        # Buck Converter Pattern
-        elif requirements.circuit_type == "buck_converter":
-            # Fetch parts from DB
-            ctrl_spec = db.get_by_mpn("LM2596S-5.0") or db.search(category="regulator_buck")[0]
-            # Create fallback inductor spec if not in DB
-            class IndSpec:
-                value = "47uH"
-                footprint = "12x12mm"
-                symbol = "Inductor"
-                mpn = "SRR1280-470M"
-            ind_spec = db.get_by_mpn("SRR1280-470M") or IndSpec()
-            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
-            c_out_spec = db.get_by_mpn("C-100uF-1206") or db.search(category="capacitor")[0]
-            diode_spec = db.get_by_mpn("SS14") or db.search(category="diode")[0]
-
-            # Buck Controller U1 (LM2596S-5.0)
-            u1 = Component(
-                ref="U1",
-                value=ctrl_spec.value,
-                component_type=ComponentType.REGULATOR_BUCK,
-                footprint=ctrl_spec.footprint,
-                symbol=ctrl_spec.symbol,
-                mpn=ctrl_spec.mpn,
-                manufacturer=ctrl_spec.manufacturer,
-                description=ctrl_spec.description,
-            )
-            # LM2596 pins: 1=VIN, 2=SW, 3=GND, 4=FB, 5=ON/OFF
-            u1.add_pin("1", "VIN", PinType.POWER_IN)
-            u1.add_pin("2", "SW", PinType.OUTPUT)
-            u1.add_pin("3", "GND", PinType.POWER_IN)
-            u1.add_pin("4", "FB", PinType.INPUT)
-            u1.add_pin("5", "EN", PinType.INPUT)
-            circuit.add_component(u1)
-
-            # Inductor L1
-            l1 = Component(
-                ref="L1",
-                value=ind_spec.value,
-                component_type=ComponentType.INDUCTOR,
-                footprint=ind_spec.footprint,
-                symbol=ind_spec.symbol,
-                mpn=ind_spec.mpn,
-            )
-            l1.add_pin("1", "1", PinType.PASSIVE)
-            l1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(l1)
-
-            # Input Capacitor C1
-            c1 = Component(
-                ref="C1",
-                value=c_in_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_in_spec.footprint,
-                symbol=c_in_spec.symbol,
-                mpn=c_in_spec.mpn,
-            )
-            c1.add_pin("1", "1", PinType.PASSIVE)
-            c1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c1)
-
-            # Output Capacitor C2
-            c2 = Component(
-                ref="C2",
-                value=c_out_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_out_spec.footprint,
-                symbol=c_out_spec.symbol,
-                mpn=c_out_spec.mpn,
-            )
-            c2.add_pin("1", "1", PinType.PASSIVE)
-            c2.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c2)
-
-            # Freewheeling Diode D1
-            d1 = Component(
-                ref="D1",
-                value=diode_spec.value,
-                component_type=ComponentType.DIODE,
-                footprint=diode_spec.footprint,
-                symbol=diode_spec.symbol,
-                mpn=diode_spec.mpn,
-            )
-            d1.add_pin("1", "A", PinType.PASSIVE)
-            d1.add_pin("2", "K", PinType.PASSIVE)
-            circuit.add_component(d1)
-
-            # Nets for buck converter
-            circuit.connect("U1", "1", "VIN")       # VIN
-            circuit.connect("U1", "2", "SW")        # Switch node
-            circuit.connect("U1", "3", "GND")       # GND
-            circuit.connect("U1", "5", "VIN")       # EN tied to VIN
-            circuit.connect("L1", "1", "SW")        # Inductor to switch node
-            circuit.connect("L1", "2", "VOUT")      # Inductor to output
-            circuit.connect("C1", "1", "VIN")
-            circuit.connect("C1", "2", "GND")
-            circuit.connect("C2", "1", "VOUT")
-            circuit.connect("C2", "2", "GND")
-            circuit.connect("D1", "A", "SW")        # Diode anode to switch node
-            circuit.connect("D1", "K", "VOUT")      # Diode cathode to output
-            # Feedback divider (simplified - would need R1, R2 for adjustable version)
-            circuit.connect("U1", "4", "VOUT")      # FB directly to output for fixed 5V version
-        
-        # Boost Converter Pattern
-        elif requirements.circuit_type == "boost_converter":
-            # Fetch parts from DB
-            ctrl_spec = db.get_by_mpn("MT3608") or db.search(category="regulator_buck")[0]
-            class IndSpec:
-                value = "10uH"
-                footprint = "6x6mm"
-                symbol = "Inductor"
-                mpn = "SRR0604-100M"
-            ind_spec = db.get_by_mpn("SRR0604-100M") or IndSpec()
-            c_in_spec = db.get_by_mpn("C-10uF-0805") or db.search(category="capacitor")[0]
-            c_out_spec = db.get_by_mpn("C-22uF-0805") or db.search(category="capacitor")[0]
-            diode_spec = db.get_by_mpn("SS14") or db.search(category="diode")[0]
-            res_spec = db.get_by_mpn("R-100k-0805") or db.search(category="resistor")[0]
-            res2_spec = db.get_by_mpn("R-20k-0805") or db.search(category="resistor")[0]
-
-            # Boost Controller U1 (MT3608)
-            u1 = Component(
-                ref="U1",
-                value=ctrl_spec.value,
-                component_type=ComponentType.REGULATOR_BOOST,
-                footprint=ctrl_spec.footprint,
-                symbol=ctrl_spec.symbol,
-                mpn=ctrl_spec.mpn,
-                manufacturer=ctrl_spec.manufacturer,
-                description=ctrl_spec.description,
-            )
-            # MT3608 pins: 1=SW, 2=GND, 3=FB, 4=EN, 5=VIN, 6=NC
-            u1.add_pin("1", "SW", PinType.OUTPUT)
-            u1.add_pin("2", "GND", PinType.POWER_IN)
-            u1.add_pin("3", "FB", PinType.INPUT)
-            u1.add_pin("4", "EN", PinType.INPUT)
-            u1.add_pin("5", "VIN", PinType.POWER_IN)
-            circuit.add_component(u1)
-
-            # Inductor L1
-            l1 = Component(
-                ref="L1",
-                value=ind_spec.value,
-                component_type=ComponentType.INDUCTOR,
-                footprint=ind_spec.footprint,
-                symbol=ind_spec.symbol,
-                mpn=ind_spec.mpn,
-            )
-            l1.add_pin("1", "1", PinType.PASSIVE)
-            l1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(l1)
-
-            # Input Capacitor C1
-            c1 = Component(
-                ref="C1",
-                value=c_in_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_in_spec.footprint,
-                symbol=c_in_spec.symbol,
-                mpn=c_in_spec.mpn,
-            )
-            c1.add_pin("1", "1", PinType.PASSIVE)
-            c1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c1)
-
-            # Output Capacitor C2
-            c2 = Component(
-                ref="C2",
-                value=c_out_spec.value,
-                component_type=ComponentType.CAPACITOR,
-                footprint=c_out_spec.footprint,
-                symbol=c_out_spec.symbol,
-                mpn=c_out_spec.mpn,
-            )
-            c2.add_pin("1", "1", PinType.PASSIVE)
-            c2.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c2)
-
-            # Schottky Diode D1
-            d1 = Component(
-                ref="D1",
-                value=diode_spec.value,
-                component_type=ComponentType.DIODE,
-                footprint=diode_spec.footprint,
-                symbol=diode_spec.symbol,
-                mpn=diode_spec.mpn,
-            )
-            d1.add_pin("1", "A", PinType.PASSIVE)
-            d1.add_pin("2", "K", PinType.PASSIVE)
-            circuit.add_component(d1)
-
-            # Feedback Resistors R1 (top), R2 (bottom)
-            r1 = Component(
-                ref="R1",
-                value=res_spec.value,
-                component_type=ComponentType.RESISTOR,
-                footprint=res_spec.footprint,
-                symbol=res_spec.symbol,
-                mpn=res_spec.mpn,
-            )
-            r1.add_pin("1", "1", PinType.PASSIVE)
-            r1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r1)
-
-            r2 = Component(
-                ref="R2",
-                value=res2_spec.value,
-                component_type=ComponentType.RESISTOR,
-                footprint=res2_spec.footprint,
-                symbol=res2_spec.symbol,
-                mpn=res2_spec.mpn,
-            )
-            r2.add_pin("1", "1", PinType.PASSIVE)
-            r2.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r2)
-
-            # Nets for boost converter
-            circuit.connect("U1", "5", "VIN")       # VIN
-            circuit.connect("U1", "2", "GND")       # GND
-            circuit.connect("U1", "4", "VIN")       # EN tied to VIN
-            circuit.connect("L1", "1", "VIN")       # Inductor to VIN
-            circuit.connect("L1", "2", "SW")        # Inductor to switch node
-            circuit.connect("U1", "1", "SW")        # Switch pin to switch node
-            circuit.connect("D1", "A", "SW")        # Diode anode to switch node
-            circuit.connect("D1", "K", "VOUT")      # Diode cathode to output
-            circuit.connect("C1", "1", "VIN")
-            circuit.connect("C1", "2", "GND")
-            circuit.connect("C2", "1", "VOUT")
-            circuit.connect("C2", "2", "GND")
-            # Feedback divider: VOUT -> R1 -> FB -> R2 -> GND
-            circuit.connect("R1", "1", "VOUT")
-            circuit.connect("R1", "2", "FB_NODE")
-            circuit.connect("R2", "1", "FB_NODE")
-            circuit.connect("R2", "2", "GND")
-            circuit.connect("U1", "3", "FB_NODE")
-        
-        # LED Circuit Pattern
-        elif requirements.circuit_type == "led_driver":
-            led_spec = db.get_by_mpn("LED-GREEN-0805") or db.search(category="led")[0]
-            res_spec = db.get_by_mpn("R-330-0805") or db.search(category="resistor")[0]
-            
-            d1 = Component(
-                ref="D1",
-                value=led_spec.value,
-                component_type=ComponentType.LED,
-                footprint=led_spec.footprint,
-                symbol=led_spec.symbol,
-                mpn=led_spec.mpn,
-            )
-            d1.add_pin("1", "K", PinType.PASSIVE)
-            d1.add_pin("2", "A", PinType.PASSIVE)
-            circuit.add_component(d1)
-
-            r1 = Component(
-                ref="R1",
-                value=res_spec.value,
-                component_type=ComponentType.RESISTOR,
-                footprint=res_spec.footprint,
-                symbol=res_spec.symbol,
-                mpn=res_spec.mpn,
-            )
-            r1.add_pin("1", "1", PinType.PASSIVE)
-            r1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r1)
-            
-        # Phono Preamp Pattern
-        elif requirements.circuit_type == "phono_preamp":
-            # Create a simple but functional representation for SPICE/KiCad compatibility
-            # This creates a basic opamp buffer with RIAA-like feedback to satisfy the design flow
-            
-            # Dual opamp (we'll use one channel for left, one for right - simplified stereo)
-            opamp = Component(
-                ref="U1",
-                value="OPA2134",
-                component_type=ComponentType.OPAMP,
-                footprint="DIP-8",
-                symbol="OpAmp",
-                mpn="OPA2134PA",
-                manufacturer="TI",
-                description="Dual low-noise audio opamp (TL072 substitute for simulation)",
-            )
-            opamp.add_pin("1", "OUT_A", PinType.OUTPUT)
-            opamp.add_pin("2", "IN_A-", PinType.INPUT)
-            opamp.add_pin("3", "IN_A+", PinType.INPUT)
-            opamp.add_pin("4", "V-", PinType.POWER_IN)
-            opamp.add_pin("5", "IN_B+", PinType.INPUT)
-            opamp.add_pin("6", "IN_B-", PinType.INPUT)
-            opamp.add_pin("7", "OUT_B", PinType.OUTPUT)
-            opamp.add_pin("8", "V+", PinType.POWER_IN)
-            circuit.add_component(opamp)
-            
-            # Power supply connections (using virtual ground for single supply operation)
-            # We'll create a virtual ground at half supply using a resistor divider
-            circuit.connect("U1", "4", "V_NEG")   # V- to -15V (or GND in single supply)
-            circuit.connect("U1", "8", "V_POS")   # V+ to +15V (or VIN in single supply)
-            
-            # Input and output connectors
-            # Left channel
-            rca_in_l = Component(
-                ref="J1_L",
-                value="RCA_IN",
-                component_type=ComponentType.CONNECTOR,
-                footprint="RCA_TH",
-                symbol="RCA",
-                mpn="RCJ-002",
-                manufacturer="CUI Devices",
-                description="Left RCA input jack",
-            )
-            rca_in_l.add_pin("1", "SIGNAL", PinType.PASSIVE)
-            rca_in_l.add_pin("2", "SHIELD", PinType.PASSIVE)
-            circuit.add_component(rca_in_l)
-            
-            rca_out_l = Component(
-                ref="J2_L",
-                value="RCA_OUT",
-                component_type=ComponentType.CONNECTOR,
-                footprint="RCA_TH",
-                symbol="RCA",
-                mpn="RCJ-002",
-                manufacturer="CUI Devices",
-                description="Left RCA output jack",
-            )
-            rca_out_l.add_pin("1", "SIGNAL", PinType.PASSIVE)
-            rca_out_l.add_pin("2", "SHIELD", PinType.PASSIVE)
-            circuit.add_component(rca_out_l)
-            
-            # Right channel
-            rca_in_r = Component(
-                ref="J1_R",
-                value="RCA_IN",
-                component_type=ComponentType.CONNECTOR,
-                footprint="RCA_TH",
-                symbol="RCA",
-                mpn="RCJ-002",
-                manufacturer="CUI Devices",
-                description="Right RCA input jack",
-            )
-            rca_in_r.add_pin("1", "SIGNAL", PinType.PASSIVE)
-            rca_in_r.add_pin("2", "SHIELD", PinType.PASSIVE)
-            circuit.add_component(rca_in_r)
-            
-            rca_out_r = Component(
-                ref="J2_R",
-                value="RCA_OUT",
-                component_type=ComponentType.CONNECTOR,
-                footprint="RCA_TH",
-                symbol="RCA",
-                mpn="RCJ-002",
-                manufacturer="CUI Devices",
-                description="Right RCA output jack",
-            )
-            rca_out_r.add_pin("1", "SIGNAL", PinType.PASSIVE)
-            rca_out_r.add_pin("2", "SHIELD", PinType.PASSIVE)
-            circuit.add_component(rca_out_r)
-            
-            # Input resistors (47k standard for MM cartridge)
-            rin_l = Component(
-                ref="RIN_L",
-                value="47k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0747KL",
-                manufacturer="Yageo",
-                description="Left input loading resistor",
-            )
-            rin_l.add_pin("1", "1", PinType.PASSIVE)
-            rin_l.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(rin_l)
-            
-            rin_r = Component(
-                ref="RIN_R",
-                value="47k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0747KL",
-                manufacturer="Yageo",
-                description="Right input loading resistor",
-            )
-            rin_r.add_pin("1", "1", PinType.PASSIVE)
-            rin_r.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(rin_r)
-            
-            # Feedback resistors for gain (~40dB = 100x)
-            rf_l = Component(
-                ref="RF_L",
-                value="100k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Left feedback resistor",
-            )
-            rf_l.add_pin("1", "1", PinType.PASSIVE)
-            rf_l.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(rf_l)
-            
-            rf_r = Component(
-                ref="RF_R",
-                value="100k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Right feedback resistor",
-            )
-            rf_r.add_pin("1", "1", PinType.PASSIVE)
-            rf_r.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(rf_r)
-            
-            ri_l = Component(
-                ref="RI_L",
-                value="1k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Left input resistor for gain",
-            )
-            ri_l.add_pin("1", "1", PinType.PASSIVE)
-            ri_l.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(ri_l)
-            
-            ri_r = Component(
-                ref="RI_R",
-                value="1k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Right input resistor for gain",
-            )
-            ri_r.add_pin("1", "1", PinType.PASSIVE)
-            ri_r.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(ri_r)
-            
-            # DC blocking capacitors (input and output)
-            cin_l = Component(
-                ref="CIN_L",
-                value="0.1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C104K5RAC",
-                manufacturer="KEMET",
-                description="Left input blocking capacitor",
-            )
-            cin_l.add_pin("1", "1", PinType.PASSIVE)
-            cin_l.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cin_l)
-            
-            cin_r = Component(
-                ref="CIN_R",
-                value="0.1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C104K5RAC",
-                manufacturer="KEMET",
-                description="Right input blocking capacitor",
-            )
-            cin_r.add_pin("1", "1", PinType.PASSIVE)
-            cin_r.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cin_r)
-            
-            cout_l = Component(
-                ref="COUT_L",
-                value="1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C105K5RAC",
-                manufacturer="KEMET",
-                description="Left output blocking capacitor",
-            )
-            cout_l.add_pin("1", "1", PinType.PASSIVE)
-            cout_l.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cout_l)
-            
-            cout_r = Component(
-                ref="COUT_R",
-                value="1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C105K5RAC",
-                manufacturer="KEMET",
-                description="Right output blocking capacitor",
-            )
-            cout_r.add_pin("1", "1", PinType.PASSIVE)
-            cout_r.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cout_r)
-            
-            # Power supply components
-            # Input jack
-            power_jack = Component(
-                ref="J_POWER",
-                value="DC_JACK",
-                component_type=ComponentType.CONNECTOR,
-                footprint="DC_JACK_TH",
-                symbol="DC_JACK",
-                mpn="PJ-002AH",
-                manufacturer="CUI Devices",
-                description="DC power jack",
-            )
-            power_jack.add_pin("1", "TIP", PinType.PASSIVE)
-            power_jack.add_pin("2", "SLEEVE", PinType.PASSIVE)
-            circuit.add_component(power_jack)
-            
-            # Power switch
-            power_switch = Component(
-                ref="SW_POWER",
-                value="DPDT_SW",
-                component_type=ComponentType.SWITCH,
-                footprint="DPDT_TH",
-                symbol="DPDT_SW",
-                mpn="GT21MCBE",
-                manufacturer="C&K",
-                description="Power on/off switch",
-            )
-            # DPDT switch: 3 pins per pole, we'll simplify
-            power_switch.add_pin("1", "COM1", PinType.PASSIVE)
-            power_switch.add_pin("2", "NO1", PinType.PASSIVE)
-            power_switch.add_pin("3", "NC1", PinType.PASSIVE)
-            power_switch.add_pin("4", "COM2", PinType.PASSIVE)
-            power_switch.add_pin("5", "NO2", PinType.PASSIVE)
-            power_switch.add_pin("6", "NC2", PinType.PASSIVE)
-            circuit.add_component(power_switch)
-            
-            # Battery connector
-            battery_clip = Component(
-                ref="J_BATT",
-                value="9V_CLIP",
-                component_type=ComponentType.CONNECTOR,
-                footprint="9V_CLIP_TH",
-                symbol="BATT_CLIP",
-                mpn="9V_CLIP",
-                manufacturer="Keystone",
-                description="9V battery clip",
-            )
-            battery_clip.add_pin("1", "+", PinType.PASSIVE)
-            battery_clip.add_pin("2", "-", PinType.PASSIVE)
-            circuit.add_component(battery_clip)
-            
-            # Voltage regulator (we'll use a simple 7809 for 9V, but for +/-15V we need two)
-            # For simplicity in this demo, we'll use a single 9V regulator and create virtual ground
-            regulator = Component(
-                ref="U2",
-                value="7809",
-                component_type=ComponentType.REGULATOR_LDO,
-                footprint="TO-220",
-                symbol="Regulator",
-                mpn="MC7809CT",
-                manufacturer="ON Semiconductor",
-                description="9V voltage regulator",
-            )
-            regulator.add_pin("1", "INPUT", PinType.POWER_IN)
-            regulator.add_pin("2", "GROUND", PinType.POWER_IN)
-            regulator.add_pin("3", "OUTPUT", PinType.POWER_OUT)
-            circuit.add_component(regulator)
-            
-            # Filtering capacitors
-            cin_reg = Component(
-                ref="CIN_REG",
-                value="0.33uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C334K5RAC",
-                manufacturer="KEMET",
-                description="Regulator input capacitor",
-            )
-            cin_reg.add_pin("1", "1", PinType.PASSIVE)
-            cin_reg.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cin_reg)
-            
-            cout_reg = Component(
-                ref="COUT_REG",
-                value="0.1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C104K5RAC",
-                manufacturer="KEMET",
-                description="Regulator output capacitor",
-            )
-            cout_reg.add_pin("1", "1", PinType.PASSIVE)
-            cout_reg.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(cout_reg)
-            
-            # Virtual ground divider (two equal resistors to create VGND at VIN/2)
-            r_vgnd1 = Component(
-                ref="R_VGND1",
-                value="10k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Virtual ground divider resistor 1",
-            )
-            r_vgnd1.add_pin("1", "1", PinType.PASSIVE)
-            r_vgnd1.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r_vgnd1)
-            
-            r_vgnd2 = Component(
-                ref="R_VGND2",
-                value="10k",
-                component_type=ComponentType.RESISTOR,
-                footprint="0603",
-                symbol="Resistor",
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                description="Virtual ground divider resistor 2",
-            )
-            r_vgnd2.add_pin("1", "1", PinType.PASSIVE)
-            r_vgnd2.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(r_vgnd2)
-            
-            # Bypass capacitor for virtual ground
-            c_vgnd = Component(
-                ref="C_VGND",
-                value="0.1uF",
-                component_type=ComponentType.CAPACITOR,
-                footprint="0603",
-                symbol="Capacitor",
-                mpn="C0603C104K5RAC",
-                manufacturer="KEMET",
-                description="Virtual ground bypass capacitor",
-            )
-            c_vgnd.add_pin("1", "1", PinType.PASSIVE)
-            c_vgnd.add_pin("2", "2", PinType.PASSIVE)
-            circuit.add_component(c_vgnd)
-            
-            # === CONNECTIONS ===
-            
-            # Power supply connections
-            circuit.connect("J_POWER", "TIP", "VIN_RAW")
-            circuit.connect("J_POWER", "SLEEVE", "GND_RAW")
-            circuit.connect("J_BATT", "+", "VIN_RAW")
-            circuit.connect("J_BATT", "-", "GND_RAW")
-            circuit.connect("SW_POWER", "COM1", "VIN_RAW")
-            circuit.connect("SW_POWER", "COM2", "GND_RAW")
-            circuit.connect("SW_POWER", "NO1", "VIN_SW")
-            circuit.connect("SW_POWER", "NO2", "GND_SW")
-            circuit.connect("U2", "INPUT", "VIN_SW")
-            circuit.connect("U2", "GROUND", "GND_SW")
-            circuit.connect("U2", "OUTPUT", "VREG_OUT")
-            circuit.connect("CIN_REG", "1", "VIN_SW")
-            circuit.connect("CIN_REG", "2", "GND_SW")
-            circuit.connect("COUT_REG", "1", "VREG_OUT")
-            circuit.connect("COUT_REG", "2", "GND_SW")
-            
-            # Virtual ground
-            circuit.connect("R_VGND1", "1", "VREG_OUT")
-            circuit.connect("R_VGND1", "2", "VGND")
-            circuit.connect("R_VGND2", "1", "VGND")
-            circuit.connect("R_VGND2", "2", "GND_SW")
-            circuit.connect("C_VGND", "1", "VGND")
-            circuit.connect("C_VGND", "2", "GND_SW")
-            
-            # Opamp power connections (using virtual ground)
-            circuit.connect("U1", "4", "VGND")   # V- to virtual ground (simplified single supply)
-            circuit.connect("U1", "8", "VREG_OUT") # V+ to regulated 9V
-            
-            # Left channel signal path
-            circuit.connect("J1_L", "1", "LIN_SIG")
-            circuit.connect("J1_L", "2", "GROUND")
-            circuit.connect("LIN_SIG", "CIN_L", "1")
-            circuit.connect("CIN_L", "1", "LIN_C")
-            circuit.connect("CIN_L", "2", "LIN_R")
-            circuit.connect("LIN_R", "RIN_L", "1")
-            circuit.connect("RIN_L", "1", "LIN_R_IN")
-            circuit.connect("RIN_L", "2", "LIN_R_OUT")
-            circuit.connect("LIN_R_OUT", "U1", "3")
-            circuit.connect("U1", "2", "L_FB")
-            circuit.connect("L_FB", "RF_L", "1")
-            circuit.connect("RF_L", "1", "L_FB_R")
-            circuit.connect("RF_L", "2", "L_FB_OUT")
-            circuit.connect("L_FB_OUT", "U1", "7")
-            circuit.connect("U1", "7", "COUT_L")
-            circuit.connect("COUT_L", "1", "LOUT_C")
-            circuit.connect("COUT_L", "2", "LOUT_R")
-            circuit.connect("LOUT_R", "J2_L", "1")
-            circuit.connect("J2_L", "2", "GROUND")
-            
-            # Right channel signal path
-            circuit.connect("J1_R", "SIGNAL", "R_IN_RCA")
-            circuit.connect("J1_R", "SHIELD", "GND")
-            circuit.connect("R_IN_RCA", "CIN_R", "R_IN_C")
-            circuit.connect("CIN_R", "1", "R_IN_C")
-            circuit.connect("CIN_R", "2", "R_IN_R")
-            circuit.connect("R_IN_R", "RIN_R", "R_IN_R_IN")
-            circuit.connect("RIN_R", "1", "R_IN_R_IN")
-            circuit.connect("RIN_R", "2", "R_IN_R_OUT")
-            circuit.connect("R_IN_R_OUT", "U1", "IN_B+")
-            circuit.connect("U1", "IN_B-", "R_FB_IN")
-            circuit.connect("R_FB_IN", "RF_R", "R_FB_R")
-            circuit.connect("RF_R", "1", "R_FB_R")
-            circuit.connect("RF_R", "2", "R_FB_OUT")
-            circuit.connect("R_FB_OUT", "U1", "OUT_B")
-            circuit.connect("U1", "OUT_B", "COUT_R")
-            circuit.connect("COUT_R", "1", "R_OUT_C")
-            circuit.connect("COUT_R", "2", "R_OUT_R")
-            circuit.connect("R_OUT_R", "J2_R", "SIGNAL")
-            circuit.connect("J2_R", "SHIELD", "GND")
-            
-            # Ground everything that needs grounding
-            circuit.connect("J1_L", "SHIELD", "GND")
-            circuit.connect("J2_L", "SHIELD", "GND")
-            circuit.connect("J1_R", "SHIELD", "GND")
-            circuit.connect("J2_R", "SHIELD", "GND")
-            circuit.connect("J_POWER", "SLEEVE", "GND")
-            circuit.connect("J_BATT", "-", "GND")
-            circuit.connect("SW_POWER", "NC1", "GND")
-            circuit.connect("SW_POWER", "NC2", "GND")
-            circuit.connect("U2", "GROUND", "GND")
-            circuit.connect("CIN_REG", "2", "GND")
-            circuit.connect("COUT_REG", "2", "GND")
-            circuit.connect("R_VGND2", "2", "GND")
-            circuit.connect("C_VGND", "2", "GND")
-            
-            return circuit
-        
-        # Default return for any unhandled circuit type
+        This previously contained per-topology hardcoded circuits that ignored
+        the generated specification entirely. It now generates a specification
+        synchronously via the rule-based templates and builds it through the
+        same resolver/validator used for LLM output, so there is exactly one
+        code path that turns a specification into hardware.
+        """
+        spec_dict = self.spec_generator._generate_spec(requirements)
+        circuit, report = self.builder.build(
+            spec_dict,
+            requirements=requirements,
+            description=requirements.description,
+        )
+        circuit.metadata["build_report"] = report.to_dict()
         return circuit
 
-
-def create_nl_pipeline(llm_provider: Union[LLMProvider, str] = "mock", component_db=None) -> NLToCircuitPipeline:
+def create_nl_pipeline(
+    llm_provider: Union[LLMProvider, str] = "mock",
+    component_db=None,
+    allow_fallback: bool = True,
+    max_repairs: int = 2,
+) -> NLToCircuitPipeline:
     """Factory function to create NL pipeline.
-    
+
     Args:
         llm_provider: LLM provider string or LLMProvider enum
         component_db: Optional component database for part selection
+        allow_fallback: When False, LLM failures raise instead of silently
+            falling back to the rule-based template generator.
+        max_repairs: Number of validate-and-repair rounds for invalid designs.
     """
     if isinstance(llm_provider, str):
         try:
@@ -1775,8 +1432,13 @@ def create_nl_pipeline(llm_provider: Union[LLMProvider, str] = "mock", component
         llm_client = create_llm_client(provider)
     else:
         llm_client = create_llm_client(llm_provider)
-    
-    return NLToCircuitPipeline(llm_client=llm_client, component_db=None)
+
+    return NLToCircuitPipeline(
+        llm_client=llm_client,
+        component_db=component_db,
+        allow_fallback=allow_fallback,
+        max_repairs=max_repairs,
+    )
 
 
 # Module-level schema exports for testing

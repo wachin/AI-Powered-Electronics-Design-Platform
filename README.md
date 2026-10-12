@@ -9,16 +9,31 @@ This project builds an AI-powered electronics design platform that transforms na
 **Current Capabilities (Implemented):**
 1. ✅ Circuit Intermediate Representation (Circuit IR) - canonical data model
 2. ✅ Deterministic Electrical Rule Checking (ERC) - 6 validation rules
-3. ✅ JLCPCB/LCSC Component Database - 600k+ parts (yaqwsx/jlcparts offline catalog)
-4. ✅ KiCad 8 Schematic & PCB Generation - via S-expression compiler
+3. ✅ JLCPCB/LCSC Component Database - offline jlcparts catalog when present, built-in catalog otherwise
+4. ✅ KiCad Schematic Generation - S-expression compiler with real electrical
+   connectivity, verified by exporting a netlist with `kicad-cli`
 5. ✅ ngspice SPICE Simulation - DC op, transient, DC sweep
 6. ✅ FreeRouting PCB Auto-routing - DSN export → routing → SES import
-7. ✅ Bill of Materials (BOM) Generation - with pricing from JLCPCB
-8. ✅ Gerber/Drill Manufacturing Export - via kicad-cli
+7. ✅ Bill of Materials (BOM) Generation - real catalog MPNs, descriptions and pricing
+8. ✅ Gerber/Drill Manufacturing Export - via kicad-cli (for valid boards)
 9. ✅ CLI Interface - full pipeline from prompt to KiCad project
+10. ✅ Natural Language Understanding (LLM integration) - Ollama / OpenAI-compatible / Anthropic,
+    with schema-constrained output, catalog-grounded part selection, pin and ERC
+    validation, and an automatic repair loop (see `docs/llm-pipeline.md`)
+
+**Known Limitations:**
+- ⚠️ **PCB generation is not yet usable.** `generate_pcb()` emits footprints with
+  no pads and track endpoints as designator references rather than coordinates,
+  so `kicad-cli` cannot load a generated board. The schematic is correct and
+  ERC-clean; the PCB compiler needs a rewrite to emit real pads.
+- ⚠️ The built-in component catalog only covers common parts; the 600k-part
+  jlcparts catalog is used automatically when its offline database is present.
+- ⚠️ The requirement parser fills defaults for unspecified values instead of
+  asking the user.
 
 **Planned / In Progress:**
-- 🔄 Natural Language Understanding (LLM integration)
+- 🔄 PCB pad generation from real KiCad footprint libraries
+- 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
 - 🔄 Web Frontend (React/TypeScript + Yjs collaboration)
 - 🔄 Datasheet Extraction (RAG pipeline)
 - 🔄 Smart PCB Placement (thermal, signal integrity)
@@ -431,12 +446,19 @@ AI-Powered-Electronics-Design-Platform/
 ├── src/
 │   ├── core/
 │   │   ├── circuit_ir.py           # Circuit Intermediate Representation
+│   │   ├── circuit_builder.py      # Specification -> Circuit IR (real parts/pins)
+│   │   ├── component_resolver.py   # Role/type/pin/MPN resolution
 │   │   └── erc.py                  # Electrical Rule Checker
 │   ├── components/
 │   │   ├── database.py             # Unified component database
 │   │   └── jlcparts.py             # JLCPCB/LCSC catalog wrapper
+│   ├── llm/
+│   │   ├── providers.py            # Ollama / OpenAI-compatible / Anthropic clients
+│   │   ├── integration.py          # NL -> spec -> repair loop -> Circuit IR
+│   │   └── validation.py           # Design validation and repair feedback
 │   ├── generators/
-│   │   └── kicad_generator.py      # KiCad S-expression compiler
+│   │   ├── kicad_generator.py      # KiCad S-expression compiler
+│   │   └── kicad_symbols.py        # Reader for installed KiCad symbol libraries
 │   ├── simulation/
 │   │   └── ngspice.py              # SPICE simulation integration
 │   ├── routing/
@@ -450,6 +472,10 @@ AI-Powered-Electronics-Design-Platform/
 │   ├── test_component_db.py
 │   ├── test_erc.py
 │   ├── test_kicad_generator.py
+│   ├── test_kicad_netlist.py       # verifies KiCad extracts a real netlist
+│   ├── test_circuit_builder.py     # spec -> Circuit IR + validation
+│   ├── test_llm_providers.py       # real provider request/response handling
+│   ├── test_llm_pipeline_repair.py # validated generation and repair loop
 │   ├── test_ngspice.py
 │   ├── test_freerouting.py
 │   └── test_orchestrator.py
@@ -502,6 +528,7 @@ If you contribute:
 | File | Purpose |
 |------|---------|
 | `ROADMAP.md` | Development plan with implementation status checkboxes |
+| `docs/llm-pipeline.md` | LLM pipeline architecture, postmortem, and verified KiCad status |
 | `AGENTS.md` | Agent policies for external repositories |
 | `LEGAL_NOTICE.md` | Legal notice |
 | `LEGAL_DISCLAIMER.md` | Legal disclaimer |

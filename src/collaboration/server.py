@@ -8,7 +8,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Set, Optional, Any
+from typing import Dict, Set, Optional, Any, List
 from datetime import datetime
 import logging
 

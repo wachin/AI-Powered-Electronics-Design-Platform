@@ -232,7 +232,7 @@ Determine whether it can:
 
 # 5. INVESTIGATE AI/LLM ARCHITECTURES FOR ELECTRONICS
 
-- [~] **PARTIALLY IMPLEMENTED** - Structured output pipeline with JSON schemas, Mock LLM client, Ollama integration ready
+- [x] **IMPLEMENTED AND VERIFIED** - Structured output, real provider clients, validated specification → Circuit IR handoff, and an ERC-driven repair loop
 
 Research how an LLM can safely transform natural language into an electronic design.
 
@@ -241,19 +241,19 @@ Investigate:
 * [ ] LLM agents - Not yet
 * [ ] MCP - kicad-mcp-server in external/; not integrated
 * [ ] tool calling - Not yet
-* [x] **structured output** - **IMPLEMENTED** with JSON schemas (REQUIREMENT_SCHEMA, SPECIFICATION_SCHEMA)
+* [x] **structured output** - **IMPLEMENTED** with JSON schemas (REQUIREMENT_SCHEMA, SPECIFICATION_SCHEMA); Ollama gets a native `format` schema, OpenAI-compatible endpoints get `response_format: json_schema`
 * [x] **JSON schemas** - **IMPLEMENTED** for requirements & specifications
 * [ ] function calling - Not yet
 * [ ] multi-agent architectures - Not yet
 * [ ] planning agents - Not yet
-* [ ] verification agents - Not yet
-* [ ] RAG - Not yet
+* [x] **verification agents** - **PARTIALLY IMPLEMENTED** - deterministic validator + repair loop (`src/llm/validation.py`); not an autonomous agent
+* [ ] RAG - Not yet (component catalog grounding is prompt-based, not retrieval over datasheets)
 * [ ] datasheet RAG - Not yet
 * [ ] vector databases - Not yet
 * [ ] knowledge graphs - Not yet
 * [ ] constraint solving - Not yet
 * [ ] symbolic reasoning - Not yet
-* [ ] circuit graph representations - Not yet
+* [x] **circuit graph representations** - **IMPLEMENTED** - Circuit IR with components, pins, nets, power domains (`src/core/circuit_ir.py`)
 
 Find GitHub projects that demonstrate these techniques for electronics.
 
@@ -267,13 +267,37 @@ Natural language
 → deterministic compiler
 → KiCad
 
-**IMPLEMENTED**: This exact architecture in `src/llm/integration.py`:
-- `nl_to_circuit_spec()` implements the full pipeline
-- MockLLMClient for testing without API keys
-- OllamaLLMClient for local LLM integration
-- JSON Schema validation ensures structured output
+**IMPLEMENTED AND VERIFIED** — this is exactly the architecture now enforced:
 
-Analyze this architecture carefully.
+```
+Natural language
+  → RequirementParser.parse()            # LLM + schema, keyword fallback
+  → CircuitSpecificationGenerator        # LLM + schema + catalog grounding
+  → CircuitIRBuilder.build()             # deterministic: real MPNs, real pins
+  → DesignValidator                      # schema + MPN + pin + ERC checks
+  → repair loop (feed errors back)       # up to N attempts, keeps best
+  → KiCadGenerator                       # deterministic S-expression compiler
+```
+
+Key implementation notes (see `docs/llm-pipeline.md`):
+
+- The LLM never writes KiCad files. It emits a specification that is built into
+  Circuit IR by `src/core/circuit_builder.py` and compiled by
+  `src/generators/kicad_generator.py`.
+- MPNs are resolved against the component catalog; unknown parts are either
+  substituted with a real catalog part (recorded as a warning) or reported as an
+  error that drives a repair attempt.
+- Pin names are resolved against real KiCad symbol pin names with an alias layer
+  (`VO`/`VOUT`/`OUT`), so a model's reasonable wording still produces a valid
+  netlist.
+- `allow_fallback=False` makes an LLM failure an error instead of silently
+  substituting the rule-based template generator; every specification records
+  `used_llm` so a canned template can never masquerade as an AI design.
+
+**Previously broken (fixed):** the Ollama client was a copy of the mock client
+and raised `AttributeError` on every call, which was swallowed by a bare
+`except`; every "AI" design was actually the rule-based template. See
+`docs/llm-pipeline.md` for the postmortem.
 
 ---
 
@@ -845,7 +869,7 @@ Do NOT simply choose the architecture because it sounds modern.
 
 # 21. PROPOSE A REALISTIC MVP
 
-- [~] **PARTIALLY ACHIEVED** - Core pipeline works for regulator circuits; LLM understanding not implemented
+- [x] **ACHIEVED for the covered topologies** - Natural language → validated KiCad project works end to end with a real LLM; missing-requirement questioning is still not implemented
 
 Design a minimum viable product.
 
@@ -859,10 +883,10 @@ User:
 
 The system should:
 
-1. [ ] Understand the requirements. (LLM not implemented)
-2. [ ] Ask missing engineering questions. (Not implemented)
-3. [ ] Produce a structured specification. (Not implemented)
-4. [x] Select components. (JLCParts database)
+1. [x] Understand the requirements. (LLM requirement parser with schema; keyword fallback)
+2. [ ] Ask missing engineering questions. (Not implemented — the parser fills defaults instead)
+3. [x] Produce a structured specification. (LLM + JSON schema, grounded in the component catalog)
+4. [x] Select components. (JLCParts database, with substitution for unknown MPNs)
 5. [x] Generate a schematic. (CircuitIR → KiCad S-expression)
 6. [x] Open/produce the project in KiCad. (.kicad_sch, .kicad_pcb, .kicad_pro)
 7. [x] Run ERC. (Custom ERC + kicad-cli)
@@ -872,7 +896,14 @@ The system should:
 
 Identify exactly which parts can initially be delegated to existing software.
 
-**Current status:** Steps 4-10 work for pattern-matched circuits (LDO regulator, simple LED). Steps 1-3 require LLM integration.
+**Current status:** Steps 1 and 3 are now LLM-backed and validated. The
+generated design is assembled from the LLM's own component and connection list,
+then checked by ERC; a design that fails ERC is sent back to the model with the
+specific errors. Steps 4-10 work for the supported topologies (LDO, buck, boost,
+LED).
+
+**Known MVP gap:** the parser silently defaults unspecified engineering values
+(for example output current) instead of asking the user. That remains step 2.
 
 ---
 
@@ -889,13 +920,17 @@ Create a phased roadmap:
 - [x] **COMPLETE** - CircuitIR implemented (src/core/circuit_ir.py)
 
 ## Phase 2 — AI requirements interpreter
-- [ ] **PENDING** - LLM integration not started
+- [x] **IMPLEMENTED (2026-10)** - Real LLM providers (Ollama, OpenAI-compatible, Anthropic), schema-constrained output, catalog grounding, MPN resolution, pin validation, ERC repair loop (`src/llm/integration.py`, `src/llm/validation.py`, `src/core/circuit_builder.py`)
+  - Not done: multi-turn clarification of missing requirements
 
 ## Phase 3 — Component database
 - [x] **COMPLETE** - JLCParts integration (src/components/jlcparts.py, database.py)
 
 ## Phase 4 — Schematic generation
 - [x] **COMPLETE** - KiCad S-expression generator (src/generators/kicad_generator.py)
+  - Schematics now carry real electrical connectivity (lib_symbols + pin instances + labeled wires)
+  - Verified: `kicad-cli sch export netlist` returns the expected nets (tests/test_kicad_netlist.py)
+  - Symbol pins are read from the installed KiCad libraries (src/generators/kicad_symbols.py)
 
 ## Phase 5 — KiCad integration
 - [x] **COMPLETE** - kicad-cli for ERC, DRC, Gerber, DSN/SES; S-expression I/O
@@ -914,6 +949,11 @@ Create a phased roadmap:
 
 ## Phase 10 — DRC
 - [x] **COMPLETE** - Via kicad-cli pcb drc
+- [ ] **GAP** - `generate_pcb()` does not emit footprint pads and writes track
+  endpoints as designator references (`(start D1.2)`) instead of coordinates, so
+  `kicad-cli` cannot load a *generated* board ("Failed to load board"). The DRC
+  integration itself works on valid boards; the generated PCB is not yet valid.
+  Fix by copying pad definitions from `/usr/share/kicad/footprints/*.pretty/`.
 
 ## Phase 11 — Manufacturing files
 - [x] **COMPLETE** - Gerber export via kicad-cli; BOM generation

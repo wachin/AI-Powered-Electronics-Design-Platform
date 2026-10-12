@@ -4,7 +4,7 @@ FastAPI Backend for AI-Powered Electronics Design Platform.
 Exposes the design orchestrator as a REST API for web frontend integration.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List

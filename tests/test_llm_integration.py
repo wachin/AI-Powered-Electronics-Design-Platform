@@ -310,6 +310,34 @@ class TestNLToCircuitPipeline:
         assert spec.requirements.output_voltage == 3.3
         assert spec.requirements.output_current == 0.5
 
+    @pytest.mark.asyncio
+    async def test_pipeline_produces_validated_circuit_ir(self):
+        """The pipeline must deliver a built, ERC-valid circuit, not just a spec."""
+        pipeline = create_nl_pipeline(LLMProvider.MOCK)
+
+        circuit = await pipeline.nl_to_circuit_ir(
+            "Design a 5V to 3.3V LDO regulator with LED indicator"
+        )
+
+        assert circuit.components
+        # The mock client returns an empty spec, so the pipeline falls back to
+        # the rule-based generator; either way the result must pass ERC.
+        assert pipeline.last_validation is not None
+        assert pipeline.last_validation.valid is True
+        assert pipeline.last_validation.erc.passed is True
+
+    @pytest.mark.asyncio
+    async def test_fallback_spec_is_marked_as_not_llm(self):
+        """A canned template must never masquerade as an AI-generated design."""
+        pipeline = create_nl_pipeline(LLMProvider.MOCK)
+
+        spec = await pipeline.nl_to_circuit_spec(
+            "Design a 5V to 3.3V LDO regulator with LED indicator"
+        )
+
+        # MockLLMClient returns no usable components, so this is the template.
+        assert spec.used_llm is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

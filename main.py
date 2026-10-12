@@ -4,6 +4,7 @@ Main CLI entry point for AI-Powered Electronics Design Platform.
 """
 
 import argparse
+import asyncio
 import sys
 import json
 from pathlib import Path
@@ -20,6 +21,7 @@ def main():
 Examples:
   %(prog)s -p "Design a 5V to 3.3V LDO regulator with LED indicator"
   %(prog)s -p "Create a buck converter 12V to 5V" --no-spice --no-routing
+  %(prog)s -p "Design a 5V to 3.3V LDO" --provider ollama --model qwen2.5:3b
   %(prog)s -p "Simple LED blinker with 555 timer" -o ./my_project -n timer_555
 """
     )
@@ -45,6 +47,43 @@ Examples:
         help="Name of the output project",
     )
     parser.add_argument(
+        "--provider",
+        type=str,
+        default="mock",
+        choices=["mock", "ollama", "openai", "anthropic"],
+        help=(
+            "LLM provider. 'mock' uses the deterministic rule-based generator; "
+            "'ollama' uses a local model; 'openai' covers any OpenAI-compatible "
+            "endpoint via --base-url."
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name for the selected provider (e.g. qwen2.5:3b)",
+    )
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="Base URL for the provider (e.g. http://localhost:11434)",
+    )
+    parser.add_argument(
+        "--max-repairs",
+        type=int,
+        default=2,
+        help="How many times an invalid design is sent back to the model",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Fail instead of falling back to the rule-based template generator "
+            "when the LLM is unavailable"
+        ),
+    )
+    parser.add_argument(
         "--no-spice",
         action="store_true",
         help="Disable SPICE simulation (ngspice)",
@@ -62,13 +101,21 @@ Examples:
     print("🤖 AI-Powered Electronics Design Platform")
     print("=" * 60)
     print(f"📝 Prompt: {args.prompt}")
+    print(f"🧠 Provider: {args.provider}" + (f" ({args.model})" if args.model else ""))
     print(f"📁 Target Output: {output_dir.resolve()}")
     print(f"🔬 SPICE Simulation: {'Disabled' if args.no_spice else 'Enabled'}")
     print(f"🛣️  PCB Auto-routing: {'Disabled' if args.no_routing else 'Enabled'}")
     print("-" * 60)
 
     db = ComponentDatabase()
-    orchestrator = AIDesignOrchestrator(db=db)
+    orchestrator = AIDesignOrchestrator(
+        db=db,
+        llm_provider=args.provider,
+        llm_model=args.model,
+        llm_base_url=args.base_url,
+        allow_fallback=not args.strict,
+        max_repairs=args.max_repairs,
+    )
 
     request = DesignRequest(
         prompt=args.prompt,
@@ -76,7 +123,20 @@ Examples:
         run_spice=not args.no_spice,
         run_routing=not args.no_routing,
     )
-    summary = orchestrator.process_request(request, output_dir)
+    summary = asyncio.run(orchestrator.process_request(request, output_dir))
+
+    print("\n🧾 Design Provenance:")
+    if summary.used_llm:
+        print(f"  Topology: {summary.topology or 'n/a'}")
+        print("  Source:   LLM-generated specification")
+    else:
+        print(f"  Topology: {summary.topology or 'n/a'}")
+        print(
+            "  Source:   ⚠️  rule-based template "
+            "(the LLM was unavailable and fallback was allowed)"
+        )
+    for note in summary.design_notes[:6]:
+        print(f"  Note:     {note}")
 
     print("\n🔍 ERC Report Summary:")
     print(f"  Status: {'✅ PASSED' if summary.erc_report.passed else '❌ FAILED'}")

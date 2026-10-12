@@ -6,15 +6,76 @@ Supports multiple LLM providers (Ollama, OpenAI, Anthropic) with a unified inter
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Any, AsyncGenerator, Union
-import asyncio
+from typing import Dict, List, Optional, Any, Union
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+class LLMResponseError(RuntimeError):
+    """Raised when a provider returns content that cannot be used."""
+
+
+_FENCE_RE = re.compile(r"```(?:json|JSON)?\s*(.*?)```", re.DOTALL)
+
+
+def extract_json_object(text: str) -> Dict[str, Any]:
+    """
+    Extract a JSON object from raw LLM text.
+
+    Local and instruction-tuned models frequently wrap JSON in prose or
+    markdown fences even when asked not to. This tolerates that instead of
+    failing the whole pipeline on a stray ```json line.
+
+    Raises:
+        LLMResponseError: if no parseable JSON object can be found.
+    """
+    if not text or not text.strip():
+        raise LLMResponseError("LLM returned an empty response")
+
+    stripped = text.strip()
+    # An array is a different contract; reject it explicitly rather than trying
+    # to coerce its first object into a dict.
+    if stripped.startswith("[") and stripped.endswith("]"):
+        raise LLMResponseError(
+            "LLM returned a JSON array where a JSON object was required"
+        )
+
+    candidates: List[str] = [stripped]
+
+    # Prefer the contents of the first fenced code block, if present.
+    for match in _FENCE_RE.finditer(text):
+        fenced = match.group(1).strip()
+        if fenced:
+            candidates.append(fenced)
+
+    # Fall back to the outermost {...} span.
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start:end + 1])
+
+    saw_list = False
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, list):
+            saw_list = True
+
+    if saw_list:
+        raise LLMResponseError(
+            "LLM returned a JSON array where a JSON object was required"
+        )
+    preview = text.strip()[:300]
+    raise LLMResponseError(f"Could not parse JSON object from LLM response: {preview!r}")
 
 
 class LLMProvider(Enum):
@@ -74,7 +135,9 @@ class OllamaClient(LLMClient):
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout, base_url=self.base_url
+            )
         return self._client
 
     async def health_check(self) -> bool:
@@ -93,49 +156,100 @@ class OllamaClient(LLMClient):
         max_tokens: int = 4096,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
-        """Synchronous completion for testing."""
-        # Handle both string and list of messages
+        """Call the Ollama /api/chat endpoint."""
+        client = await self._get_client()
+
         if isinstance(messages, str):
-            key = messages
+            normalized = [LLMMessage(role="user", content=messages)]
         else:
-            key = messages[-1].content if messages else "default"
-        response = self.responses.get(key, {
-            "circuit_type": "ldo_regulator",
-            "description": "Mock response",
-            "input_voltage": 5.0,
-            "output_voltage": 3.3,
-            "current": 0.5,
-        })
-        return LLMResponse(content=json.dumps(response))
+            normalized = list(messages)
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in normalized],
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+
+        # Ollama accepts a JSON schema in `format` to constrain decoding.
+        if response_format:
+            schema = self._schema_from_response_format(response_format)
+            if schema is not None:
+                payload["format"] = schema
+
+        try:
+            response = await client.post("/api/chat", json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            # Older Ollama builds reject structured `format`; retry unconstrained.
+            if "format" in payload:
+                logger.warning(
+                    "Ollama rejected structured format (%s); retrying without it",
+                    e.response.status_code,
+                )
+                payload.pop("format", None)
+                response = await client.post(
+                    "/api/chat", json=payload, timeout=self.timeout
+                )
+                response.raise_for_status()
+                data = response.json()
+            else:
+                logger.error(f"Ollama completion failed: {e}")
+                raise
+        except Exception as e:
+            logger.error(f"Ollama completion failed: {e}")
+            raise
+
+        message = data.get("message") or {}
+        content = message.get("content")
+        if content is None:
+            content = data.get("response", "")
+
+        if not content:
+            raise LLMResponseError(
+                f"Ollama returned an empty message for model {self.model}"
+            )
+
+        return LLMResponse(
+            content=content,
+            usage={
+                "prompt_tokens": data.get("prompt_eval_count", 0),
+                "completion_tokens": data.get("eval_count", 0),
+            },
+            model=data.get("model", self.model),
+            finish_reason=data.get("done_reason", ""),
+        )
+
+    @staticmethod
+    def _schema_from_response_format(
+        response_format: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Extract a bare JSON schema from an OpenAI-style response_format."""
+        if "json_schema" in response_format:
+            inner = response_format["json_schema"]
+            if isinstance(inner, dict):
+                return inner.get("schema", inner)
+            return inner
+        if response_format.get("type") == "json_object":
+            return None
+        return response_format
 
     async def complete_structured(
         self,
         messages: List[LLMMessage],
         response_schema: Dict[str, Any],
         temperature: float = 0.1,
+        max_tokens: int = 2048,
     ) -> Dict[str, Any]:
-        """Generate structured output using JSON schema."""
-        format_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "structured_output",
-                "schema": response_schema,
-            },
-        }
-
+        """Generate schema-constrained JSON output via Ollama's `format` field."""
         response = await self.complete(
             messages=messages,
-            temperature=0.1,  # Lower temperature for structured output
-            max_tokens=4096,
-            response_format={"type": "json_schema", "json_schema": {"name": "output", "schema": response_schema}},
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_schema", "json_schema": response_schema},
         )
-
-        try:
-            return json.loads(response.content)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse structured output: {e}")
-            logger.error(f"Raw content: {e}")
-            raise
+        return extract_json_object(response.content)
 
 
 class OpenAIClient(LLMClient):
@@ -216,10 +330,12 @@ class OpenAIClient(LLMClient):
         messages: List[LLMMessage],
         response_schema: Dict[str, Any],
         temperature: float = 0.1,
+        max_tokens: int = 2048,
     ) -> Dict[str, Any]:
         response = await self.complete(
             messages=messages,
-            temperature=0.1,
+            temperature=temperature,
+            max_tokens=max_tokens,
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -229,7 +345,7 @@ class OpenAIClient(LLMClient):
                 },
             },
         )
-        return json.loads(response.content)
+        return extract_json_object(response.content)
 
     async def health_check(self) -> bool:
         try:
@@ -324,6 +440,7 @@ class AnthropicClient(LLMClient):
         messages: List[LLMMessage],
         response_schema: Dict[str, Any],
         temperature: float = 0.1,
+        max_tokens: int = 2048,
     ) -> Dict[str, Any]:
         # Add schema instruction to system prompt
         schema_instruction = f"\n\nRespond with valid JSON matching this schema:\n{json.dumps(response_schema, indent=2)}"
@@ -340,9 +457,10 @@ class AnthropicClient(LLMClient):
 
         response = await self.complete(
             messages=enhanced_messages,
-            temperature=0.1,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
-        return json.loads(response.content)
+        return extract_json_object(response.content)
 
     async def health_check(self) -> bool:
         return True
@@ -391,6 +509,7 @@ class MockLLMClient(LLMClient):
         messages: List[LLMMessage],
         response_schema: Dict[str, Any],
         temperature: float = 0.1,
+        max_tokens: int = 2048,
     ) -> Dict[str, Any]:
         key = messages[-1].content if messages else "default"
         # Try to match based on circuit type in the prompt
@@ -422,7 +541,7 @@ class MockLLMClient(LLMClient):
                 "output_voltage": 3.3,
                 "output_current": 0.5,
             })
-        elif "led driver" in prompt_text:
+        elif "led" in prompt_text:
             return self.responses.get("led", {
                 "circuit_type": "led_driver",
                 "description": "Mock LED driver circuit",
