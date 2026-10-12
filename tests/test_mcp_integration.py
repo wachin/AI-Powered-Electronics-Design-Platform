@@ -58,12 +58,30 @@ class TestRegistry:
         # The isolated environment still holds the server's own packages.
         assert "PYTHONPATH" in spec.launch_env()
 
-    def test_pcbparts_is_source_installed(self):
-        """It has no PyPI release and no console script."""
+    def test_pcbparts_installs_from_its_git_url(self):
+        """
+        pcbparts-mcp has no PyPI release, so it is declared as a git dependency.
+
+        This is the point of the whole design: installable code is declared as a
+        dependency, not cloned into the repository.
+        """
         spec = get_spec("pcbparts")
-        assert spec.install == []
+        assert len(spec.install) == 1
+        assert "git+https://github.com/" in spec.install[0]
         assert spec.module
-        assert spec.source_dir is not None
+        # It must not point into the reference checkout.
+        assert spec.source_dir is None
+
+    def test_no_server_installs_from_the_reference_checkout(self):
+        """`external/` is reference-only: nothing installable may live there."""
+        from src.agents.mcp_registry import EXTERNAL_DIR
+
+        for spec in REGISTRY.values():
+            assert spec.source_dir is None, (
+                f"{spec.key} installs from external/, which is reference-only"
+            )
+            for requirement in spec.install:
+                assert str(EXTERNAL_DIR) not in requirement
 
     def test_pcbnew_interpreter_is_discovered_or_absent(self):
         """The lookup must return a real path, or None -- never raise."""
@@ -222,17 +240,28 @@ class TestServerManager:
         manager = MCPServerManager()
         assert manager.base_dir.name == ".mcp_envs"
 
-    def test_install_reports_missing_source_instead_of_crashing(self, tmp_path):
-        """pcbparts has no PyPI package; a missing checkout must be a clear error."""
+    def test_ensure_env_creates_a_usable_interpreter(self, tmp_path):
+        """Setting up a server must produce a working interpreter."""
         manager = MCPServerManager(base_dir=tmp_path, verbose=False)
         spec = get_spec("pcbparts")
-        # Point at a directory that cannot exist.
-        import dataclasses
+        ok, created, error = manager.ensure_env(spec)
+        assert ok is True, error
+        assert (tmp_path / "pcbparts" / "bin" / "python").exists()
 
-        broken = dataclasses.replace(
-            spec, source_dir=tmp_path / "definitely-missing", install=[]
+    def test_free_route_jar_and_java_are_discoverable(self):
+        """
+        Routing needs both a jar and a Java 25 runtime; the server env wires
+        whatever is found, and must not crash when neither is present.
+        """
+        from src.agents.mcp_registry import (
+            FREEROUTING_JAR_ENV,
+            find_freerouting_jar,
+            find_java25,
         )
-        ok, _, _ = manager.ensure_env(broken)
-        # The environment is created successfully; the missing source is
-        # reported by install(), not by ensure_env().
-        assert ok is True
+
+        jar, java = find_freerouting_jar(), find_java25()
+        assert jar is None or jar.is_file()
+        assert java is None or java.exists()
+        env = get_spec("kicad").launch_env()
+        if jar is not None:
+            assert env[FREEROUTING_JAR_ENV] == str(jar)

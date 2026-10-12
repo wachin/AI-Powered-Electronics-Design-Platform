@@ -1,7 +1,20 @@
 """
 FreeRouting Integration for AI-Powered Electronics Design Platform.
 
-Automatically routes PCB traces using the FreeRouting open-source autorouter.
+Routes PCB traces with the FreeRouting autorouter.
+
+Two details make this work on a modern KiCad install:
+
+* **DSN/SES go through `pcbnew`, not `kicad-cli`.** The `kicad-cli pcb export
+  dsn` and `kicad-cli pcb import ses` subcommands do not exist in KiCad 7+. The
+  `pcbnew` Python bindings provide `ExportSpecctraDSN` and `ImportSpecctraSES`,
+  which do.
+* **FreeRouting needs Java 25.** The distributed jars are compiled to class-file
+  version 69. An older runtime refuses to start them, so a suitable JDK is
+  located explicitly rather than assuming the default `java` is new enough.
+
+FreeRouting is not bundled with any Python package; the jar is looked up in
+`libs/freerouting/` and in a few standard locations. See CREDITS.md.
 """
 
 import subprocess
@@ -17,6 +30,7 @@ class RoutingResult:
     success: bool
     routed_dsn_path: Optional[Path] = None
     routed_ses_path: Optional[Path] = None
+    routed_pcb_path: Optional[Path] = None
     drc_errors: int = 0
     stdout: str = ""
     stderr: str = ""
@@ -28,21 +42,34 @@ class FreeRoutingRunner:
     Runs FreeRouting autorouter on KiCad DSN files.
     """
 
-    def __init__(self, freerouting_jar: Optional[str] = None):
+    def __init__(
+        self,
+        freerouting_jar: Optional[str] = None,
+        java: Optional[str] = None,
+    ):
         self.freerouting_jar = freerouting_jar or self._find_freerouting_jar()
+        self.java = java or self._find_java()
 
-    def _find_freerouting_jar(self) -> str:
-        # Check common locations
-        candidates = [
-            "freerouting.jar",
-            "external/freerouting/freerouting.jar",
-            "/usr/local/bin/freerouting.jar",
-            str(Path.home() / "freerouting.jar"),
-        ]
-        for c in candidates:
-            if Path(c).exists():
-                return c
-        return "freerouting.jar"  # Assume in PATH
+    @staticmethod
+    def _find_freerouting_jar() -> Optional[str]:
+        """Locate the FreeRouting jar, preferring the project's own copy."""
+        from src.agents.mcp_registry import find_freerouting_jar
+
+        found = find_freerouting_jar()
+        return str(found) if found else None
+
+    @staticmethod
+    def _find_java() -> str:
+        """
+        Find a Java runtime new enough for the FreeRouting jars (Java 25+).
+
+        Falls back to plain `java` so a system with a suitably new default still
+        works even if discovery fails.
+        """
+        from src.agents.mcp_registry import find_java25
+
+        found = find_java25()
+        return str(found) if found else "java"
 
     def route_pcb(self, kicad_pcb_path: Path, output_dir: Optional[Path] = None) -> RoutingResult:
         """
@@ -80,116 +107,161 @@ class FreeRoutingRunner:
             return route_result
 
         # Step 3: Import routed SES back to KiCad
-        import_result = self._import_ses(routed_ses_path, routed_pcb_path)
+        import_result = self._import_ses(routed_ses_path, pcb_path, routed_pcb_path)
         if not import_result.success:
             return import_result
 
+        tracks = self._count_tracks(routed_pcb_path)
         return RoutingResult(
             success=True,
             routed_dsn_path=dsn_path,
             routed_ses_path=routed_ses_path,
+            routed_pcb_path=routed_pcb_path,
             drc_errors=0,
+            stdout=f"routed board: {routed_pcb_path} ({tracks} tracks)",
+        )
+
+    @staticmethod
+    def _count_tracks(pcb_path: Path) -> int:
+        """Number of track segments in the routed board, or 0 if unreadable."""
+        import re
+
+        try:
+            text = pcb_path.read_text(errors="replace")
+        except OSError:
+            return 0
+        return len(re.findall(r"\n\s*\(segment\b", text))
+
+    def _pcbnew(self, code: str) -> subprocess.CompletedProcess:
+        """
+        Run a snippet against KiCad's `pcbnew` bindings.
+
+        `pcbnew` ships with KiCad and is not importable from this project's
+        virtual environment, so the snippet runs in a system interpreter that
+        has it. The interpreter is discovered once and reused.
+        """
+        from src.agents.mcp_registry import find_pcbnew_python
+
+        python = find_pcbnew_python()
+        if python is None:
+            return subprocess.CompletedProcess(
+                args=["pcbnew"], returncode=1, stdout="", stderr=(
+                    "KiCad's pcbnew Python bindings were not found. Install KiCad, "
+                    "or run `python3 -c 'import pcbnew'` to check the interpreter."
+                ),
+            )
+        return subprocess.run(
+            [str(python), "-c", code], capture_output=True, text=True, timeout=300
         )
 
     def _export_dsn(self, pcb_path: Path, dsn_path: Path) -> RoutingResult:
-        """Export KiCad PCB to DSN format using kicad-cli.
-        
-        Note: KiCad 7+ removed DSN export support. This will fail on KiCad 7+.
-        For DSN export, you need KiCad 6 or use an external converter.
         """
-        # Check KiCad version first
+        Export a KiCad PCB to Specctra DSN via `pcbnew`.
+
+        `kicad-cli` has no DSN export from KiCad 7 onward, so this uses the
+        `pcbnew.ExportSpecctraDSN` API instead.
+        """
+        code = (
+            "import pcbnew, sys\n"
+            f"board = pcbnew.LoadBoard({str(pcb_path)!r})\n"
+            f"ok = pcbnew.ExportSpecctraDSN(board, {str(dsn_path)!r})\n"
+            "print('OK' if ok else 'FAILED')\n"
+        )
         try:
-            version_result = subprocess.run(
-                ["kicad-cli", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10
+            result = self._pcbnew(code)
+        except Exception as exc:  # noqa: BLE001
+            return RoutingResult(success=False, error=f"DSN export failed: {exc}")
+
+        if result.returncode != 0 or "OK" not in (result.stdout or ""):
+            return RoutingResult(
+                success=False,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                error=(
+                    "DSN export failed via pcbnew: "
+                    f"{(result.stderr or result.stdout or '').strip()[:400]}"
+                ),
             )
-            if version_result.returncode == 0:
-                version_str = version_result.stdout.strip()
-                # Parse version (e.g., "9.0.1" or "8.0.4")
-                major_version = int(version_str.split('.')[0]) if version_str.split('.')[0].isdigit() else 0
-                if major_version >= 7:
-                    return RoutingResult(
-                        success=False,
-                        error=(
-                            f"KiCad {version_str} detected: DSN export was removed in KiCad 7+.\n"
-                            "FreeRouting requires DSN format which is no longer supported.\n"
-                            "Workarounds:\n"
-                            "  1. Use KiCad's built-in interactive router (Route -> Auto Route)\n"
-                            "  2. Use an external DSN converter (e.g., kicad-dsn-exporter)\n"
-                            "  3. Install KiCad 6.x alongside for DSN export\n"
-                            "  4. Use pcbnew Python scripting for custom routing"
-                        )
-                    )
-        except Exception:
-            pass  # Version check failed, try anyway
-        
-        try:
-            result = subprocess.run(
-                ["kicad-cli", "pcb", "export", "dsn", str(pcb_path), "-o", str(dsn_path)],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if result.returncode != 0:
-                return RoutingResult(
-                    success=False,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    error=(
-                        f"DSN export failed: {result.stderr}\n"
-                        "Note: KiCad 7+ removed DSN export support. "
-                        "You need KiCad 6.x for DSN export, or use an external converter."
-                    )
-                )
-            return RoutingResult(success=True)
-        except Exception as e:
-            return RoutingResult(success=False, error=str(e))
+        if not dsn_path.exists():
+            return RoutingResult(success=False, error=f"DSN not written: {dsn_path}")
+        return RoutingResult(success=True, routed_dsn_path=dsn_path)
 
     def _run_freerouting(self, dsn_path: Path, ses_output: Path) -> RoutingResult:
-        """Execute FreeRouting on DSN file."""
+        """Run FreeRouting with Java 25 and the modern CLI flags."""
+        if not self.freerouting_jar:
+            return RoutingResult(
+                success=False,
+                error=(
+                    "FreeRouting jar not found. Place it at "
+                    "libs/freerouting/freerouting.jar or set "
+                    "KICAD_MCP_FREEROUTING_JAR."
+                ),
+            )
         try:
             result = subprocess.run(
                 [
-                    "java", "-jar", self.freerouting_jar,
-                    "-d", str(dsn_path),
-                    "-o", str(ses_output)
+                    self.java, "-jar", self.freerouting_jar,
+                    "-de", str(dsn_path),
+                    "-do", str(ses_output),
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=900,
             )
             if result.returncode != 0:
                 return RoutingResult(
                     success=False,
                     stdout=result.stdout,
                     stderr=result.stderr,
-                    error=f"FreeRouting failed: {result.stderr}"
+                    error=f"FreeRouting failed: {(result.stderr or '')[-400:]}",
                 )
-            return RoutingResult(success=True)
-        except Exception as e:
-            return RoutingResult(success=False, error=str(e))
+            if not ses_output.exists():
+                return RoutingResult(
+                    success=False,
+                    stdout=result.stdout,
+                    error="FreeRouting reported success but produced no SES file",
+                )
+            return RoutingResult(success=True, routed_ses_path=ses_output)
+        except Exception as exc:  # noqa: BLE001
+            return RoutingResult(success=False, error=str(exc))
 
-    def _import_ses(self, ses_path: Path, pcb_output: Path) -> RoutingResult:
-        """Import routed SES file back to KiCad PCB format."""
-        try:
-            result = subprocess.run(
-                ["kicad-cli", "pcb", "import", "ses", str(ses_path), "-o", str(pcb_output)],
-                capture_output=True,
-                text=True,
-                timeout=60
+    def _import_ses(
+        self, ses_path: Path, source_pcb: Path, pcb_output: Path
+    ) -> RoutingResult:
+        """
+        Import a routed SES back into the PCB via `pcbnew`.
+
+        Loads `source_pcb` (the original, unrouted board) and writes the routed
+        result to `pcb_output`, so the original is preserved.
+        """
+        if not ses_path.exists():
+            return RoutingResult(
+                success=False, error=f"routed SES file is missing: {ses_path}"
             )
-            if result.returncode != 0:
-                return RoutingResult(
-                    success=False,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    error=f"SES import failed: {result.stderr}"
-                )
-            return RoutingResult(success=True)
-        except Exception as e:
-            return RoutingResult(success=False, error=str(e))
+        code = (
+            "import pcbnew\n"
+            f"board = pcbnew.LoadBoard({str(source_pcb)!r})\n"
+            f"ok = pcbnew.ImportSpecctraSES(board, {str(ses_path)!r})\n"
+            "if ok:\n"
+            f"    board.Save({str(pcb_output)!r})\n"
+            "print('OK' if ok else 'FAILED')\n"
+        )
+        try:
+            result = self._pcbnew(code)
+        except Exception as exc:  # noqa: BLE001
+            return RoutingResult(success=False, error=f"SES import failed: {exc}")
+
+        if result.returncode != 0 or "OK" not in (result.stdout or ""):
+            return RoutingResult(
+                success=False,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                error=(
+                    "SES import failed via pcbnew: "
+                    f"{(result.stderr or result.stdout or '').strip()[:400]}"
+                ),
+            )
+        return RoutingResult(success=True)
 
 
 def route_kicad_pcb(pcb_path: Path, freerouting_jar: Optional[str] = None) -> RoutingResult:

@@ -22,9 +22,9 @@ pins and electrical rules, and then compiles it — deterministically — into a
 KiCad schematic and PCB, a bill of materials you can order, and Gerber files you
 can send to a board house.
 
-**What works today:** the full path from prompt to an ERC-clean KiCad project
-with a correct netlist and Gerbers. **Not yet:** PCB auto-routing (blocked by a
-Java version mismatch) and datasheet understanding. See
+**What works today:** the full path from prompt to an ERC-clean, **auto-routed**
+KiCad project with a correct netlist, Gerbers and drill files. **Not yet:**
+datasheet understanding and multi-turn clarification. See
 [Known Limitations](#known-limitations).
 
 ---
@@ -40,7 +40,7 @@ This project builds an AI-powered electronics design platform that transforms na
 4. ✅ KiCad Schematic Generation - S-expression compiler with real electrical
    connectivity, verified by exporting a netlist with `kicad-cli`
 5. ✅ ngspice SPICE Simulation - DC op, transient, DC sweep
-6. ⛔ PCB Auto-routing - wrapper written, **blocked** (Java version mismatch); see Known Limitations
+6. ✅ PCB Auto-routing - FreeRouting via `pcbnew` DSN/SES; verified 0 unconnected pads
 7. ✅ Bill of Materials (BOM) Generation - real catalog MPNs, descriptions and pricing
 8. ✅ Gerber/Drill Manufacturing Export - verified on generated boards via `kicad-cli`
 9. ✅ CLI Interface - full pipeline from prompt to KiCad project
@@ -49,18 +49,16 @@ This project builds an AI-powered electronics design platform that transforms na
     validation, and an automatic repair loop (see `docs/llm-pipeline.md`)
 
 ### Known Limitations
-- ⚠️ **PCB auto-routing does not run on a current KiCad install.** Three
-  separate blockers, all verified:
-  1. `kicad-cli pcb export dsn` was **removed in KiCad 7** and
-     `kicad-cli pcb import ses` never existed. (The working path is
-     `pcbnew.ExportSpecctraDSN` / `pcbnew.ImportSpecctraSES`, which are available.)
-  2. Every bundled FreeRouting jar is compiled for **Java 25**; this machine runs
-     Java 21, so the jars refuse to start.
-  3. The wrapper still calls the removed `kicad-cli` subcommands instead of
-     `pcbnew`.
-  Generated boards are therefore **unrouted**: route them in KiCad's editor, or
-  fix the three items above. The router reports a clear error rather than
-  failing silently.
+- ⚠️ **Auto-routing needs Java 25 and a FreeRouting jar**, neither of which is a
+  Python dependency:
+  - FreeRouting jars are compiled to class-file version 69, so Java 21 refuses
+    them. Install a newer JDK (`sudo apt install openjdk-25-jdk`); the code
+    discovers it and does not require changing the system default.
+  - The jar is not bundled with anything. Place it at
+    `libs/freerouting/freerouting.jar` or set `KICAD_MCP_FREEROUTING_JAR`.
+  Verified working: 30 tracks routed, **0 unconnected pads**, on a generated
+  board. Without these, generation still succeeds and routing reports a clear
+  error instead of failing silently.
 - ⚠️ The built-in component catalog covers only common parts. The full
   jlcparts catalog is used automatically when its offline database is present,
   but it is **not** bundled — without it, part substitution is limited.
@@ -446,7 +444,7 @@ python main.py -p "Create a 12V to 5V buck converter 3A output"
 | **KiCad** (9.x) | Schematic/PCB generation, ERC, DRC, Gerbers | Provides `kicad-cli` **and** the symbol/footprint libraries the generators read at runtime. `.kicad_sym` / `.kicad_footprint` data is not vendored — see `CREDITS.md` |
 | ngspice | SPICE simulation | Optional; simulation is reported as failed, not silently skipped, when absent |
 | Node.js 18+ | Web frontend only | Not needed for the CLI |
-| Java 25 | FreeRouting auto-routing | Currently a blocker: every bundled jar targets Java 25 and will not run on Java 21. See Known Limitations |
+| Java 25 | FreeRouting auto-routing | `sudo apt install openjdk-25-jdk`. Installs alongside Java 21; the default runtime does not change |
 
 Verify the system dependencies:
 
@@ -548,7 +546,10 @@ negotiation.
 | Server | License | What it adds |
 |---|---|---|
 | `kicad` — [kicad-mcp-server](https://pypi.org/project/kicad-mcp-server/) | MIT | 23 tools: ERC, DRC, board info, netlist/SPICE export, Gerber/drill, STEP/3D, SVG/PDF, JLCPCB packaging, `auto_route` |
-| `pcbparts` — `pcbparts-mcp` | MIT | Cross-distributor part search (JLCPCB/Mouser/DigiKey), parametric filtering, alternatives, PCB design rules, ~285 reference boards |
+| `pcbparts` — [pcbparts-mcp](https://github.com/Averyy/pcbparts-mcp) | MIT | Cross-distributor part search (JLCPCB/Mouser/DigiKey), parametric filtering, alternatives, PCB design rules, ~285 reference boards |
+
+Both are declared as dependencies in `pyproject.toml` (PyPI for the first, git URL
+for the second), so **no repository needs to be cloned into the source tree**.
 
 ### The `pcbnew` detail
 
@@ -573,10 +574,15 @@ The DRC notices appear because KiCad's *global* footprint library table is not
 populated; they are an environment notice, not a defect, and the code labels them
 as such.
 
-`auto_route` is present but **still blocked**: it needs a FreeRouting jar
-(`KICAD_MCP_FREEROUTING_JAR`), and every jar bundled in `external/freerouting/`
-is compiled for **Java 25** while this machine has Java 21. Same blocker as the
-built-in router — see [Known Limitations](#known-limitations).
+`auto_route` additionally needs `xvfb-run` (from the `xvfb` package) because the
+MCP tool launches FreeRouting in a virtual display:
+
+```bash
+sudo apt install -y xvfb
+```
+
+The project's **own** router (`src/routing/freerouting.py`) does not need `xvfb`,
+so `--no-routing` can be omitted even without it.
 
 ---
 

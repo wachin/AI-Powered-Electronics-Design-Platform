@@ -44,12 +44,16 @@ dev = [
 
 # Optional: MCP servers for extra analysis/validation tools.
 #
-# These are NOT installed into this environment. Each server runs as its own
-# subprocess in an isolated virtual environment (see src/agents/mcp_servers.py),
-# because they have mutually incompatible `mcp` version requirements.
-# Declared here for discoverability and version pinning only.
+# These are declared as real dependencies so no repository has to be cloned into
+# the source tree. They are still installed into isolated environments instead of
+# this one (`ai-electronics-design mcp-setup`), because their `mcp` version
+# requirements are mutually incompatible: kicad-mcp-server needs
+# `mcp[cli]>=1.27,<2` while pcbparts-mcp pins `mcp==1.25.0`.
+#
+# kicad-mcp-server is on PyPI; pcbparts-mcp is not, so it is pinned by git URL.
 mcp = [
     "kicad-mcp-server>=3.5.0",
+    "pcbparts-mcp @ git+https://github.com/Averyy/pcbparts-mcp.git",
 ]
 
 # Convenience umbrella for contributors.

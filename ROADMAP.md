@@ -955,13 +955,20 @@ Create a phased roadmap:
 - [x] **COMPLETE** - Smart placement with collision avoidance, thermal awareness, signal integrity (src/pcb/smart_placement.py)
 
 ## Phase 9 — PCB routing
-- [~] **BLOCKED BY UPSTREAM** - FreeRouting integration exists
-  (src/routing/freerouting.py) but cannot currently run: FreeRouting requires
-  Specctra DSN input, and `kicad-cli pcb export dsn` **was removed in KiCad 7+**
-  (verified absent in the installed KiCad 9.0.2; `kicad-cli pcb export` lists no
-  DSN subcommand). The module already detects this and returns a clear error
-  instead of failing silently. Options: KiCad 6 alongside, an external DSN
-  converter, or `pcbnew` Python scripting.
+- [x] **COMPLETE (2026-10)** - FreeRouting integration working end to end.
+  Both blockers are resolved:
+  - DSN export and SES import now go through the **`pcbnew` Python API**
+    (`ExportSpecctraDSN` / `ImportSpecctraSES`), because `kicad-cli pcb export
+    dsn` and `kicad-cli pcb import ses` do not exist in KiCad 7+.
+  - The caller supplies a **Java 25** runtime (the jars are class-file version
+    69); `find_java25()` discovers one and does not require changing the system
+    default.
+  - Verified: a generated LDO routed to **30 tracks, 0 unconnected pads**, and
+    `kicad-cli pcb drc` reports 0 unconnected items on the routed board.
+  - The FreeRouting jar is not bundled; it is looked up in
+    `libs/freerouting/`, `KICAD_MCP_FREEROUTING_JAR`, or a user data directory.
+  - **`external/` is not required for this or anything else.** Verified by
+    running the full suite (234 passed) with the directory renamed away.
 
 ## Phase 10 — DRC
 - [x] **COMPLETE** - Via kicad-cli pcb drc

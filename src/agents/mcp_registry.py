@@ -50,6 +50,92 @@ def _candidate_system_pythons() -> List[Path]:
     return unique
 
 
+def freerouting_jar_candidates() -> List[Path]:
+    """
+    Places a FreeRouting jar may live, most preferred first.
+
+    FreeRouting is not bundled with any Python package, so it is either supplied
+    by the user (``KICAD_MCP_FREEROUTING_JAR``), kept in this project's cache
+    directory, or found in the reference checkout when one is present.
+    """
+    import os
+
+    candidates: List[Path] = []
+    from_env = os.environ.get(FREEROUTING_JAR_ENV)
+    if from_env:
+        candidates.append(Path(from_env))
+    candidates += [
+        REPO_ROOT / "libs" / "freerouting" / "freerouting.jar",
+        Path.home() / ".local" / "share" / "freerouting" / "freerouting.jar",
+        EXTERNAL_DIR / "freerouting" / "scripts" / "benchmark" / "binaries"
+        / "freerouting-current.jar",
+    ]
+    return candidates
+
+
+def find_freerouting_jar() -> Optional[Path]:
+    """Return the first existing FreeRouting jar, if any."""
+    for candidate in freerouting_jar_candidates():
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+@lru_cache(maxsize=1)
+def find_java25() -> Optional[Path]:
+    """
+    Locate a Java 25+ runtime.
+
+    The bundled FreeRouting jars are compiled to class-file version 69 (Java 25),
+    so an older runtime refuses to start them with
+    ``UnsupportedClassVersionError``. Several JDKs can coexist, so we look for a
+    sufficiently new one rather than assuming the default ``java`` is new enough.
+    """
+    import os
+    import subprocess
+
+    candidates: List[Path] = []
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        candidates.append(Path(java_home) / "bin" / "java")
+
+    # Debian installs each JDK under /usr/lib/jvm/java-<version>-openjdk-*.
+    jvm_root = Path("/usr/lib/jvm")
+    if jvm_root.is_dir():
+        for directory in sorted(jvm_root.glob("java-*")):
+            candidates.append(directory / "bin" / "java")
+        for directory in sorted(jvm_root.glob("openjdk-*")):
+            candidates.append(directory / "bin" / "java")
+
+    seen = set()
+    for path in candidates:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        try:
+            probe = subprocess.run(
+                [str(path), "-version"], capture_output=True, text=True, timeout=20
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        version_text = (probe.stderr or probe.stdout or "")
+        # Expect something like: openjdk version "25.0.4.1"
+        match = None
+        for token in version_text.replace('"', " ").split():
+            if token[:2].isdigit() and "." in token:
+                match = token
+                break
+        if not match:
+            continue
+        try:
+            major = int(match.split(".")[0])
+        except ValueError:
+            continue
+        if major >= 25:
+            return path
+    return None
+
+
 @lru_cache(maxsize=1)
 def find_pcbnew_python() -> Optional[Path]:
     """Return a system interpreter that can `import pcbnew`, if one exists."""
@@ -71,6 +157,11 @@ def find_pcbnew_python() -> Optional[Path]:
 EXTERNAL_DIR = REPO_ROOT / "external"
 # Per-server environments live outside version control.
 MCP_ENV_ROOT = REPO_ROOT / ".mcp_envs"
+
+# FreeRouting ships as a jar that is NOT bundled with any package. The
+# kicad-mcp-server `auto_route` tool needs it, and needs a Java 25 runtime.
+FREEROUTING_JAR_ENV = "KICAD_MCP_FREEROUTING_JAR"
+FREEROUTING_JAVA_ENV = "KICAD_MCP_JAVA_CMD"
 
 
 @dataclass(frozen=True)
@@ -119,14 +210,28 @@ class MCPServerSpec:
         """
         Extra environment for launching this server.
 
-        When `needs_system_python` is set, the server's packages live in the
-        isolated environment but the interpreter is the system one (so `pcbnew`
-        is importable). We expose the packages through PYTHONPATH.
+        When ``needs_system_python`` is set, the server's packages live in the
+        isolated environment but the interpreter is the system one (so ``pcbnew``
+        is importable); the packages are exposed through PYTHONPATH.
+
+        The kicad server additionally needs a FreeRouting jar and a Java 25+
+        runtime for its ``auto_route`` tool. Both are wired up here when found so
+        routing works without the caller having to know about them.
         """
-        if not self.needs_system_python:
-            return {}
-        site = self.site_packages
-        return {"PYTHONPATH": str(site)} if site else {}
+        env: Dict[str, str] = {}
+        if self.needs_system_python:
+            site = self.site_packages
+            if site:
+                env["PYTHONPATH"] = str(site)
+
+        if self.key == "kicad":
+            jar = find_freerouting_jar()
+            if jar is not None:
+                env[FREEROUTING_JAR_ENV] = str(jar)
+            java = find_java25()
+            if java is not None:
+                env[FREEROUTING_JAVA_ENV] = str(java)
+        return env
 
     def launch_command(self) -> Optional[List[str]]:
         """Command list to start the server, or None if not set up yet."""
@@ -166,7 +271,7 @@ REGISTRY: Dict[str, MCPServerSpec] = {
             "Launched with the system interpreter so KiCad's native `pcbnew` "
             "bindings are importable (needed by get_board_info, auto_route and "
             "the 3D/STEP exports); the server's own packages stay isolated. "
-            "Also available as an editable install from external/kicad-mcp-server."
+            "Installed from PyPI, so no repository has to be cloned."
         ),
         provides=[
             "validate_pin_configuration",
@@ -185,14 +290,13 @@ REGISTRY: Dict[str, MCPServerSpec] = {
             "rules, reference boards, alternatives"
         ),
         license="MIT",
-        # No PyPI release and no console script, so install the local source.
-        install=[],
+        # Not on PyPI, but installable straight from its git URL. Installing
+        # from a URL keeps it a declared dependency instead of a cloned repo.
+        install=["pcbparts-mcp @ git+https://github.com/Averyy/pcbparts-mcp.git"],
         module="pcbparts_mcp.server",
-        source_dir=EXTERNAL_DIR / "pcbparts-mcp" / "src",
         notes=(
-            "Not published on PyPI and defines no console script. Its "
-            "`mcp==1.25.0` pin is conservative — the code imports fine with "
-            "newer versions — and isolation makes it moot either way."
+            "Installed from its git URL (no PyPI release). It pins "
+            "`mcp==1.25.0`, which is why it lives in its own environment."
         ),
         provides=[
             "cross-distributor part search",
@@ -264,7 +368,12 @@ def status() -> List[Dict[str, object]]:
 
 __all__ = [
     "EXTERNAL_DIR",
+    "FREEROUTING_JAR_ENV",
+    "FREEROUTING_JAVA_ENV",
+    "find_freerouting_jar",
+    "find_java25",
     "find_pcbnew_python",
+    "freerouting_jar_candidates",
     "MCP_ENV_ROOT",
     "MCPServerSpec",
     "REGISTRY",
