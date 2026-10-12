@@ -159,30 +159,30 @@ your sentence to a board you can order, assemble and power on.
 └────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
-┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ───────────────┐
-│                                                                            │
-│   The AI never writes KiCad files. Code does that, and code decides        │
-│   whether the answer is physically real:                                   │
-│                                                                            │
-│   ROLE -> TYPE      MPN -> REAL PART    PIN RESOLUTION      BUILD CIRCUIT IR │
-│   input_capacitor   exact catalog hit   checked against     components, nets, │
-│    -> Capacitor     or a substitute     the installed       power domains, │
-│   led_resistor      with the right      KiCad symbol's      designators (U1, │
-│    -> Resistor      value and package   real pin names      C1, R1, D1 ...) │
-│         │                  │                  │                   │        │
-│         └──────────────────┴────────┬─────────┴───────────────────┘        │
-│                                     ▼                                      │
-│   VALIDATE:  schema ok | parts exist | pins exist | 6 ERC rules pass       │
-│                                     │                                      │
-│                          errors? ───┴─── yes ──> REPAIR: hand the model the │
-│                             │                     exact problems, ask for a │
-│                             │                     corrected spec, keep the │
+┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ────────────────────┐
+│                                                                                │
+│   The AI never writes KiCad files. Code does that, and code decides            │
+│   whether the answer is physically real:                                       │
+│                                                                                │
+│   ROLE -> TYPE      MPN -> REAL PART    PIN RESOLUTION      BUILD CIRCUIT IR   │
+│   input_capacitor   exact catalog hit   checked against     components, nets,  │
+│    -> Capacitor     or a substitute     the installed       power domains,     │
+│   led_resistor      with the right      KiCad symbol's      designators (U1,   │
+│    -> Resistor      value and package   real pin names      C1, R1, D1 ...)    │
+│         │                  │                  │                   │            │
+│         └──────────────────┴────────┬─────────┴───────────────────┘            │
+│                                     ▼                                          │
+│   VALIDATE:  schema ok | parts exist | pins exist | 6 ERC rules pass           │
+│                                     │                                          │
+│                          errors? ───┴─── yes ──> REPAIR: hand the model the    │
+│                             │                     exact problems, ask for a    │
+│                             │                     corrected spec, keep the     │
 │                             │                     best attempt (up to N tries) │
-│                             ▼  no errors                                   │
-└────────────────────────────────────────────────────────────────────────────┘
+│                             ▼  no errors                                       │
+└────────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
-┌── 5. WHAT YOU RECEIVE ────────────────────────────────────────────────────┐
+┌── 5. WHAT YOU RECEIVE ─────────────────────────────────────────────────────┐
 │                                                                            │
 │   design.kicad_sch   schematic with REAL electrical connectivity           │
 │                      (verified with: kicad-cli sch export netlist)         │
@@ -197,20 +197,20 @@ your sentence to a board you can order, assemble and power on.
 └────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
-┌── 6. YOUR PART ───────────────────────────────────────────────────────────┐
-│                                                                            │
-│   Order the parts from the BOM  ->  have the board made from the Gerbers   │
+┌── 6. YOUR PART ─────────────────────────────────────────────────────────────┐
+│                                                                             │
+│   Order the parts from the BOM  ->  have the board made from the Gerbers    │
 │   (or etch/mill it yourself)    ->  solder the components  ->  power it on. │
-│                                                                            │
-│   The design is ERC-clean and uses real parts, so it is something you      │
-│   can actually build -- not a plausible-looking sketch.                    │
-└────────────────────────────────────────────────────────────────────────────┘
+│                                                                             │
+│   The design is ERC-clean and uses real parts, so it is something you       │
+│   can actually build -- not a plausible-looking sketch.                     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```json wrapper does not break the run.      │
 │                                                                             │
 │    Output is a specification, NOT a schematic:                              │
 │      {"topology": "LDO Linear Regulator",                                   │
-│       "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],      │
-│       "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]}  │
+│       "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],     │
+│       "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]} │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                     │
                                     ▼
@@ -229,12 +229,12 @@ your sentence to a board you can order, assemble and power on.
 │  │ VALIDATE:  schema ✓   parts exist ✓   pins exist ✓   ERC rules ✓      │  │
 │  └───────────────────────────────┬───────────────────────────────────────┘  │
 │                                  │                                          │
-│                        errors? ──┴── yes ──▶  ┌──────────────────────────┐  │
-│                                              │ REPAIR: send the model   │  │
-│                                              │ the exact problems and   │  │
-│                                              │ ask for a corrected spec │  │
-│                                              └────────────┬─────────────┘  │
-│                                                           │ (up to N tries)│
+│                        errors? ──┴── yes ──▶ ┌──────────────────────────┐   │
+│                                              │ REPAIR: send the model   │   │
+│                                              │ the exact problems and   │   │
+│                                              │ ask for a corrected spec │   │
+│                                              └────────────┬─────────────┘   │
+│                                                           │ (up to N tries) │
 │                              no errors ◀──────────────────┘                 │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                     │
@@ -257,7 +257,7 @@ your sentence to a board you can order, assemble and power on.
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 6. YOUR PART                                                               │
+│ 6. YOUR PART                                                                │
 │                                                                             │
 │   Order the parts from the BOM  →  have the board made from the Gerbers     │
 │   (or etch/mill it yourself)    →  solder the components                    │
