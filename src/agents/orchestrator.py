@@ -14,7 +14,7 @@ Pipeline:
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 
 from src.core.circuit_ir import (
     CircuitIR,
@@ -139,8 +139,12 @@ class AIDesignOrchestrator:
         llm_base_url: Optional[str] = None,
         allow_fallback: bool = True,
         max_repairs: int = 2,
+        clarifier: Optional[Callable[[Any], str]] = None,
     ):
         self.db = db or ComponentDatabase()
+        # Answers questions about anything the request left open. None means
+        # nobody is there to answer, and the defaults are reported instead.
+        self.clarifier = clarifier
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.llm_base_url = llm_base_url
@@ -163,6 +167,7 @@ class AIDesignOrchestrator:
             # taking the mock client's canned requirements, which discarded
             # whatever the user typed.
             deterministic=llm_provider == "mock",
+            clarifier=clarifier,
         )
         self.nl_pipeline.set_orchestrator(self)
 

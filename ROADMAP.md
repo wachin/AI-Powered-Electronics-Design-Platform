@@ -610,6 +610,33 @@ Find open-source projects that could help.
 
 ---
 
+- [x] **IMPLEMENTED** - Multi-turn clarification
+  (``src/llm/clarification.py``). The parser no longer fills gaps itself; the
+  clarifier asks about them from a terminal, and ``fill_defaults`` fills in
+  whatever nobody answered and records it as an assumption. One place decides the
+  defaults, one place records them.
+- [x] **IMPLEMENTED** - Only what changes the design is asked about: the
+  topology when the request did not name one, the input and output voltages, the
+  current, and a linear regulator that will get hot. Each question states **why**
+  it is being asked, the answer it proposes, and — for a thermal decision — the
+  current that would be feasible.
+- [x] **IMPLEMENTED** - Nobody to ask is handled rather than ignored: a piped
+  run, an API call or a test has no terminal, so the defaults are filled and
+  reported. ``--ask`` forces the questions, ``--no-ask`` suppresses them, and the
+  default is to ask when stdin is a terminal.
+- [x] **VERIFIED** - Each field is asked **at most once**, which bounds the loop
+  and makes it terminate even when every answer is the default. Without that, the
+  thermal question re-fired after being answered with the default, for ever.
+- [x] **VERIFIED** - The answers reach the design: answering 12 V / 5 V / 1 A
+  produces a design that drops 7 V, not the 1.7 V of the 5 V default.
+- [ ] **OPEN** - The clarification cannot offer a switching topology, because
+  ``buck`` and ``boost`` resolve their controller with no pins and fail
+  validation. A question must not offer an answer that leads to a broken design,
+  so the available topologies are listed and the unusable ones are named with the
+  reason.
+
+---
+
 # 9. CIRCUIT VALIDATION
 
 - [x] **IMPLEMENTED** - ERC engine in src/core/erc.py with 6 validation rules + unit tests

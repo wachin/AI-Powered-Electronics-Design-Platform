@@ -7,7 +7,7 @@ Provides natural language to CircuitIR conversion using LLM providers.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union
+from typing import Callable, Dict, List, Optional, Any, Union
 from pathlib import Path
 from src.llm.providers import (
     LLMProvider,
@@ -22,6 +22,11 @@ from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType, Po
 from src.core.circuit_builder import CircuitIRBuilder, BuildReport
 from src.llm.validation import DesignValidator, DesignValidationReport
 from src.components.database import ComponentDatabase
+from src.llm.clarification import (
+    clarifications_for,
+    clarify,
+    fill_defaults as fill_in,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,10 +251,20 @@ class RequirementParser:
         }
     ]
 
-    async def parse(self, natural_language: str) -> CircuitRequirement:
-        """Parse natural language into structured circuit requirements."""
+    async def parse(
+        self, natural_language: str, fill_defaults: bool = True
+    ) -> CircuitRequirement:
+        """
+        Parse natural language into structured circuit requirements.
+
+        Args:
+            fill_defaults: Fill anything the request did not state, recording each
+                value as an assumption. Set False when a clarifier will ask about
+                the gaps instead — otherwise there is nothing left to ask about.
+        """
         if self.deterministic:
-            return self._fallback_parse(natural_language)
+            requirement = self._fallback_parse(natural_language)
+            return fill_in(requirement) if fill_defaults else requirement
 
         # Build few-shot examples
         examples_text = "\n\n".join([
@@ -295,10 +310,12 @@ class RequirementParser:
                     "required": ["circuit_type", "description"]
                 }
             )
-            return CircuitRequirement(**result)
+            requirement = CircuitRequirement(**result)
+            return fill_in(requirement) if fill_defaults else requirement
         except Exception as e:
             logger.warning(f"LLM parsing failed, using fallback: {e}")
-            return self._fallback_parse(natural_language)
+            requirement = self._fallback_parse(natural_language)
+            return fill_in(requirement) if fill_defaults else requirement
 
     def _fallback_parse(self, text: str) -> CircuitRequirement:
         """
@@ -408,23 +425,11 @@ class RequirementParser:
         if any(k in text_lower for k in ["decoupling", "bypass", "filter"]):
             features.append("decoupling")
 
-        # The defaults the specification generator applies. Filling them here
-        # means the caller is told what was assumed instead of discovering it in
-        # the finished design.
-        if circuit_type in ("ldo_regulator", "buck_converter", "boost_converter"):
-            if v_in is None:
-                v_in = 5.0
-                assumptions.append("no input voltage was stated; assumed 5 V")
-            if v_out is None:
-                default_out = 3.3 if circuit_type == "ldo_regulator" else 5.0
-                v_out = default_out
-                assumptions.append(
-                    f"no output voltage was stated; assumed {default_out:g} V"
-                )
-            if current is None:
-                current = 0.5
-                assumptions.append("no current was stated; assumed 0.5 A")
-
+        # What the request left unstated is left unstated. Filling it in is
+        # `clarification.fill_defaults`' job, so that exactly one place decides the
+        # defaults and exactly one place records them as assumptions. Doing it
+        # here as well made the clarification layer pointless: by the time it
+        # looked, every field was already set.
         return CircuitRequirement(
             circuit_type=circuit_type,
             description=text.strip(),
@@ -1352,6 +1357,7 @@ class NLToCircuitPipeline:
         allow_fallback: bool = True,
         max_repairs: int = 2,
         deterministic: bool = False,
+        clarifier: Optional[Callable[[Any], str]] = None,
     ):
         """Initialize pipeline with optional LLM client and component database.
 
@@ -1367,6 +1373,12 @@ class NLToCircuitPipeline:
                 model. The mock client returns canned requirements rather than
                 reading the prompt, so without this a default run discards what
                 the user typed; see :class:`RequirementParser`.
+            clarifier: Called with a
+                :class:`~src.llm.clarification.Clarification` and returns the raw
+                answer, when the request is missing something that changes the
+                design. ``None`` means nobody is there to answer: the defaults are
+                used and reported as assumptions. The callable is injected so that
+                the pipeline never touches the terminal itself.
         """
         if llm_client is None:
             llm_client = create_llm_client("mock")
@@ -1375,6 +1387,7 @@ class NLToCircuitPipeline:
         self.max_repairs = max_repairs
         self.allow_fallback = allow_fallback
         self.deterministic = deterministic
+        self.clarifier = clarifier
         self.db = component_db if component_db is not None else ComponentDatabase()
 
         self.parser = RequirementParser(llm_client, deterministic=deterministic)
@@ -1389,6 +1402,8 @@ class NLToCircuitPipeline:
         # Populated by the most recent pipeline run, for callers that want the
         # full validation detail alongside the Circuit IR.
         self.last_validation: Optional[DesignValidationReport] = None
+        # The questions that were asked, and any still unanswered.
+        self.last_clarifications: List[Any] = []
 
     def set_orchestrator(self, orchestrator: Any) -> None:
         """Set the orchestrator for this pipeline."""
@@ -1467,8 +1482,21 @@ class NLToCircuitPipeline:
             Dictionary with requirements, specification, circuit_ir, validation,
             and generated files
         """
-        # Step 1: Parse requirements
-        requirements = await self.parser.parse(prompt)
+        # Step 1: Parse requirements, then ask about anything the prompt left
+        # open that would change the design. With no clarifier — a piped run, a
+        # test, an API call — the defaults stand and are reported as assumptions.
+        # With a clarifier the gaps are left open, so the questions can see them;
+        # whatever nobody answers is filled in afterwards and reported.
+        requirements = await self.parser.parse(
+            prompt, fill_defaults=self.clarifier is None
+        )
+        self.last_clarifications = []
+        if self.clarifier is not None:
+            asked = clarifications_for(requirements)
+            self.last_clarifications = list(asked.questions)
+            if asked:
+                requirements = clarify(requirements, self.clarifier)
+            requirements = fill_in(requirements)
 
         # Step 2+3: Generate the specification, build the Circuit IR, validate it,
         # and repair it if the electrical rules fail.
@@ -1536,6 +1564,7 @@ def create_nl_pipeline(
     component_db=None,
     allow_fallback: bool = True,
     max_repairs: int = 2,
+    clarifier: Optional[Callable[[Any], str]] = None,
 ) -> NLToCircuitPipeline:
     """Factory function to create NL pipeline.
 
@@ -1545,6 +1574,8 @@ def create_nl_pipeline(
         allow_fallback: When False, LLM failures raise instead of silently
             falling back to the rule-based template generator.
         max_repairs: Number of validate-and-repair rounds for invalid designs.
+        clarifier: Called to ask about anything the request leaves open. None
+            means nobody is there to answer and the defaults are reported.
     """
     if isinstance(llm_provider, str):
         try:
@@ -1564,6 +1595,7 @@ def create_nl_pipeline(
     return NLToCircuitPipeline(
         llm_client=llm_client,
         deterministic=deterministic,
+        clarifier=clarifier,
         component_db=component_db,
         allow_fallback=allow_fallback,
         max_repairs=max_repairs,

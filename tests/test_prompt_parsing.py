@@ -83,7 +83,14 @@ class TestVoltagesAreRead:
 
 class TestAssumptionsAreStated:
     def assumptions(self, parser, prompt):
-        return (parser._fallback_parse(prompt).constraints or {}).get("assumptions", [])
+        """
+        The parser reads the text; filling the gaps is `fill_defaults`' job, so
+        the assumptions come from `parse`, which is the public path.
+        """
+        import asyncio
+
+        requirement = asyncio.run(parser.parse(prompt))
+        return (requirement.constraints or {}).get("assumptions", [])
 
     def test_a_missing_current_is_reported(self, parser):
         assumptions = self.assumptions(parser, "12V to 3.3V LDO")

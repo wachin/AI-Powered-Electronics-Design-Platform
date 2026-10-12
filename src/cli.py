@@ -394,6 +394,23 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--ask",
+        dest="ask",
+        action="store_true",
+        default=None,
+        help=(
+            "Ask about anything the request leaves open (topology, voltages, "
+            "current) before designing. The default is to ask when run from a "
+            "terminal and not to ask when the output is piped."
+        ),
+    )
+    parser.add_argument(
+        "--no-ask",
+        dest="ask",
+        action="store_false",
+        help="Never ask; fill in the defaults and report them as assumptions.",
+    )
+    parser.add_argument(
         "--spares",
         type=float,
         default=0.0,
@@ -424,6 +441,12 @@ async def _run(args: argparse.Namespace) -> int:
     print("-" * 60)
 
     db = ComponentDatabase()
+    # Ask only when there is someone to ask: a terminal, an explicit --ask, and
+    # not an explicit --no-ask. A piped run blocks forever otherwise, which is a
+    # worse failure than filling the defaults in and saying so.
+    interactive = args.ask if args.ask is not None else sys.stdin.isatty()
+    clarifier = _terminal_clarifier() if interactive else None
+
     orchestrator = AIDesignOrchestrator(
         db=db,
         llm_provider=args.provider,
@@ -431,6 +454,7 @@ async def _run(args: argparse.Namespace) -> int:
         llm_base_url=args.base_url,
         allow_fallback=not args.strict,
         max_repairs=args.max_repairs,
+        clarifier=clarifier,
     )
 
     provider_is_mock = args.provider == "mock"
@@ -543,8 +567,11 @@ async def _run(args: argparse.Namespace) -> int:
                 f"  {refs:<10} {line.value[:9]:<9} {line.order_quantity:>6}  "
                 f"{lcsc:<10} {part:<24} {unit:>8} {line_total:>8}"
             )
-        if purchase.has_placeholder_prices:
-            print(f"\n  Estimated total: ${purchase.total_cost:.2f} (includes placeholder prices)")
+        if purchase.lines_without_prices:
+            print(
+                f"\n  Estimated total: ${purchase.total_cost:.2f} "
+                f"(for the {len(purchase.orderable_lines)} line(s) that could be priced)"
+            )
         else:
             print(f"\n  Estimated total: ${purchase.total_cost:.2f}")
         print("  Prices exclude assembly, stencil and shipping.")
@@ -565,6 +592,26 @@ async def _run(args: argparse.Namespace) -> int:
 
     print("\n🎉 Circuit design synthesis complete!")
     return 0
+
+
+def _terminal_clarifier():
+    """
+    Read answers from the terminal.
+
+    Returned as a callable so the pipeline never touches stdin itself, which is
+    what lets a test drive the same flow with scripted answers.
+    """
+    def ask(question) -> str:
+        print()
+        print(question.render())
+        try:
+            return input("        > ")
+        except EOFError:
+            # No more input: take the default rather than hanging or crashing.
+            print("        (no input; using the default)")
+            return ""
+
+    return ask
 
 
 def main(argv: list[str] | None = None) -> int:

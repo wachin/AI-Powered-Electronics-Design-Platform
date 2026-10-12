@@ -281,11 +281,37 @@ def review_linear_regulator_thermal(
     if tj_max is None:
         # State the requirement for both limits in common use, so the reader can
         # match whichever their part's datasheet quotes.
-        detail["required_theta_ja_by_limit"] = {
-            str(limit): round((limit - ambient_c) / dissipation, 1)
-            for limit in (125, 150)
+        requirements = {
+            limit: (limit - ambient_c) / dissipation for limit in (125, 150)
         }
-        detail["required_theta_ja_at_150c"] = round((150.0 - ambient_c) / dissipation, 1)
+        detail["required_theta_ja_by_limit"] = {
+            str(limit): round(value, 1) for limit, value in requirements.items()
+        }
+        detail["required_theta_ja_at_150c"] = round(requirements[150], 1)
+
+        # An absent limit does not make an impossible design possible. If the
+        # requirement is below what any surface-mount package achieves *even for
+        # the most permissive common limit*, that is a problem whatever the part's
+        # datasheet says — and saying so needs no invented figure.
+        if requirements[150] < _IMPLAUSIBLE_THETA_JA:
+            detail["limit_used_c"] = 150
+            return Finding(
+                rule_id="REVIEW_THERMAL",
+                severity=FAIL,
+                subject=subject,
+                message=(
+                    f"Dissipates {dissipation:.2f} W ({drop:.2f} V at {iout:g} A). "
+                    f"The junction temperature limit for this part is not in the "
+                    f"catalog, but it does not need to be: even for a permissive "
+                    f"150 °C limit at {ambient_c:g} °C ambient this would need a "
+                    f"thermal path better than {requirements[150]:.0f} °C/W, and no "
+                    f"ordinary surface-mount package achieves that without a "
+                    f"thermal pad or a heatsink. Reduce the input voltage, reduce "
+                    f"the current, or use a switching regulator."
+                ),
+                detail=detail,
+            )
+
         return Finding(
             rule_id="REVIEW_THERMAL",
             severity=UNKNOWN,
@@ -295,8 +321,8 @@ def review_linear_regulator_thermal(
                 f"junction temperature limit for this part is not in the catalog, "
                 f"so the required thermal path cannot be judged. At "
                 f"{ambient_c:g} °C ambient it must be better than "
-                f"{(150.0 - ambient_c) / dissipation:.0f} °C/W for a 150 °C limit, "
-                f"or {(125.0 - ambient_c) / dissipation:.0f} °C/W for a 125 °C one."
+                f"{requirements[150]:.0f} °C/W for a 150 °C limit, "
+                f"or {requirements[125]:.0f} °C/W for a 125 °C one."
             ),
             detail=detail,
         )

@@ -268,6 +268,60 @@ program can use. Two details make the contract work in practice:
 
 ---
 
+## Asking, instead of guessing
+
+The parser used to fill in every gap silently, and later report what it assumed.
+Now, from a terminal, it asks:
+
+```text
+$ ai-electronics-design -p "an LDO regulator"
+
+(1/1) What is the input voltage?
+        why: a linear regulator drops the difference between input and output, and
+        that difference becomes heat
+        default: 5.0 V (press Enter)
+        >
+(1/1) What is the output voltage?
+        why: every component in the design depends on it
+        default: 3.3 V (press Enter)
+        >
+(1/1) This linear regulator would dissipate 7.00 W (7.00 V dropped at 1 A).
+      What current do you actually need?
+        why: more than about 1 W in a surface-mount package needs a thermal path
+        most packages do not provide; about 0.14 A would stay under that ...
+        default: 1.0 A (press Enter)
+        >
+```
+
+Three things about how this behaves:
+
+* **It asks only what changes the design.** The topology (when the request did
+  not name one), the input voltage, the output voltage, the current, and one
+  design decision: a linear regulator that will get hot. Features, cost and board
+  size are never asked about, because the platform can decide those.
+* **The last question is not about a missing number.** 12 V to 3.3 V at 1 A burns
+  7 W in the regulator. That is a decision — a smaller current, a lower input
+  voltage, or accepting it — and the review computes the exact requirement after
+  the fact. It names the current that would stay under 1 W, so the answer has an
+  anchor.
+* **It does not ask when there is nobody to ask.** A piped invocation, an API
+  call or a test has no terminal, and blocking on input there would hang. Those
+  paths fill the defaults and report them:
+
+  ```text
+  Assumed:  no input voltage was stated; assumed 5 V
+  ```
+
+  `--ask` forces the questions, `--no-ask` suppresses them; the default is to ask
+  when stdin is a terminal.
+
+**A clarification must never offer an answer that leads to a broken design.** The
+topology question lists only the topologies that currently pass validation, and
+names the ones that do not, with the reason — the switched-mode controller
+resolves with no pins today.
+
+---
+
 ## The design is reviewed with numbers, not adjectives
 
 The ERC checks connectivity. A second pass checks that the **numbers** work, and
