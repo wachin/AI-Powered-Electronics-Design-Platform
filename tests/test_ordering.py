@@ -17,7 +17,6 @@ import pytest
 from src.components.database import ComponentDatabase
 from src.components.ordering import (
     PRICE_CATALOG,
-    PRICE_PLACEHOLDER,
     PRICE_UNKNOWN,
     build_purchase_list,
     minimum_order_quantity,
@@ -239,6 +238,16 @@ ROWS = [
         "1-:0.08",
         '{"leastNumber":2,"lossNumber":0,"minPurchaseNum":1}',
     ),
+    # A near-miss: LM317L is a *positive* adjustable regulator and LM337L is a
+    # negative one. One character apart, and the value "Adjustable" cannot tell
+    # them apart.
+    (
+        3003, "Power Management (PMIC)", "LM317L", "TO-92",
+        "Adjustable Linear Regulator Positive",
+        '{"Output Voltage":"1.25V","Output Current":"100mA"}', 8000,
+        "1-99:0.05,100-:0.03",
+        '{"leastNumber":1,"lossNumber":0,"minPurchaseNum":1}',
+    ),
     # An LED, matched by colour.
     (
         4001, "Optoelectronics", "LED-GREEN-0805-REAL", "0805", "Green LED 0805",
@@ -412,23 +421,23 @@ class TestShortfallsAndHonesty:
         assert line.in_stock is False
         assert any("enough stock" in warning for warning in purchase.warnings())
 
-    def test_a_builtin_only_match_is_reported_as_not_orderable(self, db):
+    def test_a_template_only_match_is_reported_as_not_orderable(self, db):
         """
-        47 uH in 1210 is in the built-in list but has no LCSC number, so it gives
-        a rough cost and nothing more. The line must say so rather than look like
-        an order.
+        47 uH in 1210 has a component template — symbol, footprint, value — and
+        no part number, so it cannot be ordered. The line must say so rather than
+        look like an order.
         """
-        builtin_only = Component(
+        template_only = Component(
             ref="X1", value="47uH", component_type=ComponentType.INDUCTOR,
             footprint="Inductor_SMD:L_1210_3225Metric", symbol="Device:L",
-            mpn="NOT-IN-CATALOG", package="1210",
+            mpn="", package="1210",
         )
-        purchase = build_purchase_list(make_circuit(builtin_only), db)
+        purchase = build_purchase_list(make_circuit(template_only), db)
         line = purchase.lines[0]
         assert line.orderable is False
         assert line.lcsc_part is None
-        assert line.price_source == PRICE_PLACEHOLDER
-        assert any("no LCSC number" in note for note in line.notes)
+        assert line.price_source == PRICE_UNKNOWN
+        assert any("component template" in note for note in line.notes)
         assert any("cannot be ordered" in warning for warning in purchase.warnings())
 
     def test_reports_a_part_with_no_match_at_all(self, db):
@@ -456,20 +465,22 @@ class TestShortfallsAndHonesty:
         purchase = build_purchase_list(make_circuit(unknown), db, boards=4)
         assert purchase.lines[0].order_quantity == 4
 
-    def test_placeholder_prices_are_flagged(self, tmp_path, monkeypatch):
+    def test_no_catalogue_means_no_prices_at_all(self, tmp_path, monkeypatch):
         """
-        Without the full catalogue the prices come from the built-in list and are
-        estimates. Presenting them as distributor prices would be a lie.
+        Without the catalogue there are no part numbers, prices or stock — the
+        templates carry none of them. An invented price is as misleading as an
+        invented part number, and this project shipped both.
         """
         monkeypatch.delenv("JLC_PARTS_CATALOG", raising=False)
         no_catalog = ComponentDatabase(tmp_path / "absent.sqlite3")
         purchase = build_purchase_list(make_circuit(resistor()), no_catalog)
         line = purchase.lines[0]
-        assert line.price_source == PRICE_PLACEHOLDER
+        assert line.price_source == PRICE_UNKNOWN
+        assert line.unit_price == 0.0
         assert line.orderable is False
-        assert purchase.has_placeholder_prices
+        assert purchase.lines_without_prices
         warnings = purchase.warnings()
-        assert any("placeholder" in warning for warning in warnings)
+        assert any("no price" in warning for warning in warnings)
         assert any("catalog-setup" in warning for warning in warnings)
 
     def test_empty_circuit_produces_an_empty_list(self, db):
@@ -573,6 +584,10 @@ class TestOrderIsAlwaysReal:
         LM337L and LM317L are one character apart: a negative adjustable
         regulator and a positive one. A value of "Adjustable" cannot distinguish
         them, so the difference has to be stated in words.
+
+        The design's own part number is set explicitly here: templates carry no
+        part number, so this hazard shows up when a design *does* name one and
+        the catalogue has to find a different part.
         """
         negative = Component(
             ref="U1", value="Adjustable", component_type=ComponentType.REGULATOR_LDO,
@@ -580,6 +595,7 @@ class TestOrderIsAlwaysReal:
             mpn="LM337L", package="TO-92",
         )
         line = build_purchase_list(make_circuit(negative), db).lines[0]
+        assert line.order_mpn and line.order_mpn != "LM337L", line.order_mpn
         assert any("nearly identical" in note for note in line.notes)
 
     def test_a_non_numeric_value_is_flagged_as_not_identifying_a_part(self, db):
@@ -655,69 +671,58 @@ class TestAgainstTheRealCatalog:
             assert part.stock > 0, f"{lcsc} has no stock"
             assert part.price > 0, f"{lcsc} has no price"
 
-    def test_the_verified_builtin_parts_still_exist(self, real_db):
-        """
-        The allowlist in the source says which built-in part numbers are real.
-        If the catalogue ever drops one, the design would start naming a part
-        nobody sells, so this fails loudly instead.
-        """
-        from src.components.database import VERIFIED_BUILTIN_MPNS
-
-        for mpn in sorted(VERIFIED_BUILTIN_MPNS):
-            hits = real_db.find_in_catalog(mpn)
-            assert hits, f"{mpn} is no longer in the catalogue"
-
-    def test_the_package_variant_builtin_parts_are_not_orderable_as_written(self, real_db):
-        """
-        Three built-in parts exist upstream only in another package. The
-        footprint will not fit, so the purchase list has to say so rather than
-        the design quietly claiming a part it cannot use.
-        """
-        from src.components.database import (
-            ComponentDatabase as _Db,
-            VERIFIED_BUILTIN_OTHER_PACKAGE,
-        )
-
-        by_mpn = {p.mpn: p for p in _Db(prefer_jlcparts=False)._fallback_catalog}
-        for mpn in sorted(VERIFIED_BUILTIN_OTHER_PACKAGE):
-            design = by_mpn[mpn]
-            hits = real_db.find_in_catalog(mpn)
-            assert hits, f"{mpn} is no longer in the catalogue"
-            assert all(
-                h.package.lower() != design.package.lower() for h in hits
-            ), f"{mpn} is now available in {design.package}; move it to VERIFIED_BUILTIN_MPNS"
-
-    def test_the_builtin_catalog_claims_no_lcsc_number(self, real_db):
-        """A placeholder must not pretend to be orderable."""
+    def test_the_templates_claim_no_lcsc_number(self, real_db):
+        """A template must not pretend to be orderable."""
         from src.components.database import ComponentDatabase as _Db
 
-        builtin = _Db(prefer_jlcparts=False)._fallback_catalog
-        assert builtin
-        assert all(p.lcsc_part is None for p in builtin)
+        templates = _Db(prefer_jlcparts=False)._component_templates
+        assert templates
+        assert all(p.lcsc_part is None for p in templates)
 
-    def test_the_documented_counts_are_accurate(self, real_db):
+    def test_the_templates_carry_no_parts_data_at_all(self, real_db):
         """
-        The docstring and the README state 7 verified, 3 package variants and 28
-        placeholders. A wrong claim in the documentation is its own kind of bug.
+        The property that replaces the old verified/placeholder allowlist: there
+        is no part number, manufacturer, price or stock anywhere in the
+        templates, so there is nothing left to be wrong about. The catalogue is
+        the only source of parts data.
         """
-        from src.components.database import (
-            VERIFIED_BUILTIN_MPNS,
-            VERIFIED_BUILTIN_OTHER_PACKAGE,
-            ComponentDatabase as _Db,
-        )
+        from src.components.database import ComponentDatabase as _Db
 
-        builtin = _Db(prefer_jlcparts=False)._fallback_catalog
-        assert len(builtin) == 38
-        assert len(VERIFIED_BUILTIN_MPNS) == 7
-        assert len(VERIFIED_BUILTIN_OTHER_PACKAGE) == 3
-        placeholders = [
-            p
-            for p in builtin
-            if p.mpn not in VERIFIED_BUILTIN_MPNS
-            and p.mpn not in VERIFIED_BUILTIN_OTHER_PACKAGE
-        ]
-        assert len(placeholders) == 28
-        for part in placeholders:
-            assert not real_db.find_in_catalog(part.mpn), (
-                f"{part.mpn} does exist upstream; it belongs in an allowlist"
-            )
+        templates = _Db(prefer_jlcparts=False)._component_templates
+        assert len(templates) == 36
+        for part in templates:
+            assert part.mpn == "", part.mpn
+            assert part.manufacturer == "", part.manufacturer
+            assert part.price == 0.0, part.price
+            assert part.stock == 0, part.stock
+            assert part.lcsc_part is None
+            # What they do carry: everything needed to place the part.
+            assert part.value and part.package
+            assert part.symbol and part.footprint
+            assert part.category
+
+    def test_every_template_footprint_exists_in_kicad(self):
+        """
+        The templates' real value is a checked symbol and footprint, so a template
+        pointing at a footprint KiCad does not have would be worse than nothing.
+        """
+        import pytest
+
+        from src.generators.kicad_footprints import load_footprint
+        from src.components.database import ComponentDatabase as _Db
+
+        templates = _Db(prefer_jlcparts=False)._component_templates
+        missing = []
+        checked = 0
+        for part in templates:
+            definition = load_footprint(part.footprint)
+            if definition is None:
+                missing.append((part.value, part.footprint))
+                continue
+            checked += 1
+            # A footprint with no pads cannot be placed or netlisted.
+            assert definition.pads, (part.value, part.footprint)
+
+        if checked == 0:
+            pytest.skip("KiCad footprint libraries are not installed")
+        assert missing == [], f"footprints KiCad does not have: {missing}"

@@ -818,12 +818,12 @@ def _review_attributes(
     """
     The ratings to review a component against, and where they came from.
 
-    A design built from the built-in list names parts whose ratings are mostly
-    absent — that list exists for symbols and pinouts, not for datasheets. The
-    part that will actually be built is the one the purchase list orders for the
-    same value and package, so its ratings are used instead, and the substitution
-    is stated. Reviewing a design against data that does not exist would produce
-    a page of "unknown" for a design that could have been checked.
+    A design built from the component templates names parts whose ratings are
+    absent — templates carry symbols and footprints, not datasheets. The part
+    that will actually be built is the one the purchase list orders for the same
+    value and package, so its ratings are used instead and the substitution is
+    stated. Reviewing against data that does not exist would produce a page of
+    "unknown" for a design that could have been checked.
     """
     attributes = _attributes(spec)
     if _has_ratings(attributes) or db is None:

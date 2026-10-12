@@ -190,11 +190,22 @@ class TestResolvers:
 
 
 class TestMPNResolution:
-    def test_exact_catalog_hit(self, db):
+    def test_a_template_match_is_not_a_part_number(self, db):
+        """
+        A component template resolves the symbol and footprint, and names no part
+        number. The purchase list is what turns it into an orderable part, so
+        that a design never claims a part number it cannot support.
+        """
         result = resolve_mpn(ComponentType.REGULATOR_LDO, "AMS1117-3.3", db)
         assert result.resolved is not None
-        assert result.resolved.mpn == "AMS1117-3.3"
-        assert result.substituted is False
+        if db.using_jlcparts:
+            # The catalogue has real AMS1117-3.3 parts, so this resolves to one.
+            assert result.resolved.mpn
+            assert result.resolved.lcsc_part
+        else:
+            assert result.resolved.mpn == ""
+            assert result.resolved.value == "3.3V"
+            assert result.resolved.symbol == "Regulator_Linear:AMS1117-3.3"
 
     def test_fake_mpn_is_substituted_with_real_part(self, db):
         result = resolve_mpn(
@@ -286,8 +297,13 @@ class TestCircuitIRBuilder:
 
         assert set(circuit.components) == {"U1", "C1", "C2", "D1", "R1"}
         assert report.total_components == 5
-        # The fake MPN must have been replaced by a real catalog part.
-        assert circuit.components["C1"].mpn == "CC0805KRX7R9BB106"
+        # The requested value and package are what identify the part. The MPN is
+        # either a real catalogue part number or empty (a template); it is never
+        # an invented one.
+        c1 = circuit.components["C1"]
+        assert c1.value == "10uF"
+        assert "0805" in c1.footprint
+        assert not c1.mpn or db.find_in_catalog(c1.mpn)
         assert report.substituted_mpns
 
     def test_uses_llm_connections_and_marks_power_nets(self, db):

@@ -7,8 +7,8 @@ A design that generates a correct schematic, a routed board and a list of parts
 is not yet useful if you cannot order the parts. The bill of materials this
 platform produced named parts like ``CC0805KRX7R9BB106`` — plausible-looking
 manufacturer part numbers that **do not exist in the JLCPCB catalogue**, priced
-from a hardcoded placeholder table. An AMS1117 module was quoted at $0.15 when
-the catalogue price is $0.0181.
+from a hardcoded table. An AMS1117 module was quoted at $0.15 when the catalogue
+price is $0.0187.
 
 This module closes that gap. For every part in the design it finds the real,
 in-stock catalogue entry for the same value and package, and reports:
@@ -41,9 +41,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # Where a bill-of-materials line's price came from. Reported so that a total is
-# never presented as a distributor quote when it is a placeholder.
+# never presented as a distributor quote when it is not one.
 PRICE_CATALOG = "catalog"
-PRICE_PLACEHOLDER = "placeholder"
 PRICE_UNKNOWN = "unknown"
 
 
@@ -297,15 +296,16 @@ class PurchaseList:
         return sum(line.order_quantity for line in self.lines)
 
     @property
-    def has_placeholder_prices(self) -> bool:
-        return any(line.price_source == PRICE_PLACEHOLDER for line in self.lines)
+    def lines_without_prices(self) -> List[PurchaseLine]:
+        """Lines with no price, which is every line when the catalogue is absent."""
+        return [line for line in self.lines if line.price_source == PRICE_UNKNOWN]
 
     def warnings(self) -> List[str]:
         """
         Everything a buyer should know before placing the order.
 
-        Deliberately explicit: a total that mixes catalogue prices with
-        placeholders, or an order that cannot be filled, has to say so.
+        Deliberately explicit: a total that covers only some of the lines, or an
+        order that cannot be filled, has to say so.
         """
         warnings: List[str] = []
 
@@ -329,11 +329,12 @@ class PurchaseList:
                 )
             )
 
-        if self.has_placeholder_prices:
+        unpriced = self.lines_without_prices
+        if unpriced:
             warnings.append(
-                "Some prices are placeholders from the built-in catalog, not "
-                "distributor prices. Install the full catalog with "
-                "'ai-electronics-design catalog-setup' for real prices and stock."
+                f"{len(unpriced)} line(s) have no price. Without the component "
+                "catalog there are no part numbers, prices or stock figures to "
+                "show; install it with 'ai-electronics-design catalog-setup'."
             )
 
         pinout_risk = [line for line in self.lines if line.pinout_check_required]
@@ -404,10 +405,15 @@ class PurchaseList:
                 lcsc = f"[{line.lcsc_part}]({url})"
             else:
                 lcsc = "—"
-            part = line.order_mpn or line.mpn
+            part = line.order_mpn or line.mpn or "no part number"
             price = "—" if line.price_source == PRICE_UNKNOWN else f"${line.unit_price:.4f}"
             total = "—" if line.price_source == PRICE_UNKNOWN else f"${line.line_total:.2f}"
-            stock = f"{line.stock:,}" if line.stock is not None else "unknown"
+            # "0" would read as "none in stock"; a template has no stock figure
+            # at all, and the difference matters to a buyer.
+            if not line.orderable or line.stock is None:
+                stock = "—"
+            else:
+                stock = f"{line.stock:,}"
             if line.orderable and not line.in_stock:
                 stock = f"**{stock}**"
             lines.append(
@@ -416,8 +422,11 @@ class PurchaseList:
             )
 
         lines.append("")
-        if self.has_placeholder_prices:
-            lines.append(f"**Estimated total: ${self.total_cost:.2f}** (includes placeholder prices)")
+        if self.lines_without_prices:
+            lines.append(
+                f"**Estimated total: ${self.total_cost:.2f}** for the "
+                f"{len(self.orderable_lines)} line(s) that could be priced"
+            )
         else:
             lines.append(f"**Estimated total: ${self.total_cost:.2f}**")
         lines.append("")
@@ -584,7 +593,7 @@ def build_purchase_list(
     Args:
         circuit: A ``CircuitIR``.
         db: A ``ComponentDatabase``. Without a catalogue, every line falls back
-            to placeholder pricing and is marked accordingly.
+            to no pricing at all and is marked accordingly.
         boards: How many copies of the board are being built.
         spare_fraction: Extra allowance, e.g. ``0.1`` for 10% spares, for hand
             assembly.
@@ -724,13 +733,13 @@ def _apply_candidate(
     line.product_url = candidate.get("product_url") or ""
 
     if not line.lcsc_part:
-        # The only thing that matched is a built-in placeholder part. It gives a
-        # rough cost and nothing else: with no LCSC number it cannot go on an
-        # order, and its price is not a distributor price.
+        # The only thing that matched is a component template. It carries the
+        # right symbol and footprint and nothing else: with no part number it
+        # cannot go on an order.
         line.notes.append(
-            f"Matched the built-in list part {line.order_mpn or line.mpn}, which "
-            "has no LCSC number and cannot be ordered from JLCPCB. The price "
-            "shown is an estimate, not a quote."
+            f"Matched the component template for {line.value} {line.package}, "
+            "which has no part number: it cannot be ordered from JLCPCB as it "
+            "stands. Install the component catalog to find a real part."
         )
 
     line.order_quantity = order_quantity_for(
@@ -754,10 +763,6 @@ def _apply_candidate(
             "No quantity price breaks published for this part; the single unit "
             "price is used."
         )
-    elif candidate.get("price"):
-        # A built-in placeholder part. The price is an estimate, not a quote.
-        line.unit_price = float(candidate["price"])
-        line.price_source = PRICE_PLACEHOLDER
     else:
         line.unit_price = 0.0
         line.price_source = PRICE_UNKNOWN

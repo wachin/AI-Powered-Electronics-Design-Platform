@@ -117,9 +117,27 @@ class TestValidatedGeneration:
         assert report.valid is True
         assert spec.used_llm is True
         assert set(circuit.components) == {"U1", "C1", "C2", "D1", "R1"}
-        # The LLM's own part choices survived, unlike the old hardcoded path.
-        assert circuit.components["U1"].mpn == "AMS1117-3.3"
-        assert circuit.components["R1"].mpn == "RC0805FR-07330RL"
+        # The LLM's own choices survived, unlike the old hardcoded path.
+        u1 = circuit.components["U1"]
+        r1 = circuit.components["R1"]
+        assert u1.value == "3.3V"
+        assert u1.package == "SOT-223"
+        assert r1.value == "330"
+        assert r1.package == "0805"
+
+        # What the design names depends on the catalogue, and it must never be an
+        # invented number. With the catalogue, the parts the LLM asked for exist
+        # and are named. Without it, the templates carry no part number, so the
+        # design names none and the requested number is recorded as substituted.
+        if db.using_jlcparts:
+            assert u1.mpn and db.find_in_catalog(u1.mpn)
+        else:
+            assert not u1.mpn
+            assert not r1.mpn
+            build_report = report.build_report
+            assert any(
+                "AMS1117-3.3" in note for note in build_report.substituted_mpns
+            ), build_report.substituted_mpns
 
     @pytest.mark.asyncio
     async def test_repair_loop_recovers_from_broken_design(self, db):

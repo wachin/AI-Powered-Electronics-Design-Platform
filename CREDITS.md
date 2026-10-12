@@ -136,10 +136,11 @@ it is downloaded by the user into their own cache directory, and it is not
 covered by this project's license. Check the distributor's terms before
 redistributing the catalog itself.
 
-When the catalog is absent, the platform falls back to a small built-in catalog
-of common parts defined in `src/components/database.py`. Part numbers, prices and
-stock figures are indicative and must be verified with the distributor before
-ordering.
+When the catalog is absent, the platform falls back to component *templates*
+defined in `src/components/database.py`: a symbol, a footprint, a package and a
+value for 36 common parts, and deliberately no part numbers, prices or stock.
+Parts data has one source — the catalog — so that a design can never name a part
+number the catalog does not know about.
 
 ---
 

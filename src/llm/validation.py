@@ -129,7 +129,7 @@ def validate_spec_shape(spec: Any) -> List[ValidationIssue]:
                 severity="error",
                 message=(
                     "The specification must contain a non-empty 'components' array, "
-                    "each entry with at least role, mpn, value and package."
+                    "each entry with at least role, value and package."
                 ),
             )
         )
@@ -145,9 +145,15 @@ def validate_spec_shape(spec: Any) -> List[ValidationIssue]:
                 )
             )
             continue
+        # `mpn` is deliberately not required. A component is identified by its
+        # value and package; requiring a part number forced the model to produce
+        # one whether or not it knew a real one, and the invented numbers then
+        # looked exactly like orderable parts. An empty mpn is the honest answer:
+        # the platform resolves a real part from the value and package, and the
+        # purchase list resolves the orderable one.
         missing = [
             key
-            for key in ("role", "mpn", "value", "package")
+            for key in ("role", "value", "package")
             if not str(_get(component, key) or "").strip()
         ]
         if missing:

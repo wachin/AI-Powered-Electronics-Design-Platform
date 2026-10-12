@@ -6,7 +6,8 @@ substitute finding, and distributor inventory data.
 
 Priority:
 1. The downloaded JLCPCB/LCSC catalog (~180,000 in-stock parts)
-2. Built-in fallback catalog - a few common parts, for offline development
+2. Component templates - symbol, footprint and package for common values,
+   used when the catalogue is not installed. Not parts: no part numbers.
 """
 
 from dataclasses import dataclass, field
@@ -18,17 +19,25 @@ from src.components.jlcparts import JLCPartsDatabase, JLCPart, download_catalog
 
 @dataclass
 class ComponentSpec:
-    """Unified component specification for the design platform."""
+    """
+    Unified component specification for the design platform.
+
+    ``manufacturer``, ``stock`` and ``price`` default to empty because a
+    component *template* has none of them: those are parts data, and the
+    catalogue is the only source of them. A caller that needs to be sure it is
+    looking at a real part should check ``lcsc_part``, which only a catalogue
+    part has.
+    """
     mpn: str
-    manufacturer: str
     category: str
     value: str
     package: str
     symbol: str
     footprint: str
     description: str
-    stock: int
-    price: float
+    manufacturer: str = ""
+    stock: int = 0
+    price: float = 0.0
     attributes: Dict[str, Any] = field(default_factory=dict)
     lcsc_part: Optional[str] = None
     is_basic: bool = False
@@ -89,580 +98,380 @@ class ComponentSpec:
         return {k: v for k, v in parsed.items() if k != "raw"}
 
 
-# The built-in part numbers that were checked and do exist in the downloaded
-# JLCPCB catalogue, in the package listed here. Anything in the built-in list
-# outside this set is a placeholder. Kept as data so the test can assert the set
-# rather than trusting a comment.
-VERIFIED_BUILTIN_MPNS = frozenset(
-    {
-        "AMS1117-3.3",
-        "1N4148W",
-        "SS14",
-        "2N7002",
-        "SI2302",
-        "TL431",
-        "LM317L",
-    }
-)
-
-# Same electrical part, but the catalogue only carries it in another package.
-VERIFIED_BUILTIN_OTHER_PACKAGE = frozenset({"LM7805", "LM2596S-5.0", "LM358"})
-
-
 class ComponentDatabase:
     """
-    Unified component database with JLCPCB/LCSC integration.
-    
-    Automatically uses the yaqwsx/jlcparts offline catalog when available
-    (download with `ComponentDatabase.download_catalog()`), otherwise falls
-    back to a built-in catalog of common parts.
+    Unified component database: the downloaded JLCPCB/LCSC catalogue, plus a set
+    of component templates for when it is not installed.
+
+    One source of *parts* data — the catalogue — and one source of *template*
+    data: the symbol, footprint and package to use for common component values.
+    Keeping a second copy of part numbers, prices and stock here is how this
+    project once came to ship 28 invented part numbers.
     """
 
     def __init__(self, db_path: Optional[Path] = None, prefer_jlcparts: bool = True):
         self.prefer_jlcparts = prefer_jlcparts
         self._jlcparts_db: Optional[JLCPartsDatabase] = None
-        self._fallback_catalog: List[ComponentSpec] = []
-        
+        self._component_templates: List[ComponentSpec] = []
+
         if prefer_jlcparts:
             self._jlcparts_db = JLCPartsDatabase(db_path)
-        
-        self._load_fallback_catalog()
 
-    def _load_fallback_catalog(self):
+        self._load_component_templates()
+
+    def _load_component_templates(self):
         """
-        Loads the curated built-in parts used when the catalogue is absent.
+        Loads the component templates used when no catalogue is installed.
 
-        Read this before trusting a part number from this list. Checked against
-        the downloaded JLCPCB catalogue:
+        These are **templates, not parts**. Each carries a category, a value, a
+        package and the KiCad symbol and footprint to use — the knowledge the
+        pipeline has been verified against, and the one thing the catalogue does
+        not supply: a real catalogue part comes back with a generic symbol
+        (``Regulator_Linear:LDO_Generic``) and a footprint derived from its
+        package name.
 
-        * **7 of the 38 part numbers exist upstream in the package given here**
-          (``AMS1117-3.3``, ``1N4148W``, ``SS14``, ``2N7002``, ``SI2302``,
-          ``TL431``, ``LM317L``) and can be ordered as written;
-        * **3 exist as the same electrical part in a different package**
-          (``LM7805``, ``LM2596S-5.0``, ``LM358``) — the footprint will not match;
-        * **the remaining 28 do not exist at any distributor.** Numbers such as
-          ``CC0805KRX7R9BB106`` and ``RC0805FR-07330RL`` are Yageo-shaped
-          placeholders, not orderable parts.
+        They deliberately carry **no part number, manufacturer, price or stock**.
+        Those are parts data, they are the catalogue's job, and keeping a second
+        copy here is how this project ended up with 28 invented part numbers —
+        numbers that looked exactly like orderable parts
+        (``CC0805KRX7R9BB106``, ``RC0805FR-07330RL``) and were not. The prices
+        were as invented as the numbers: an AMS1117 was quoted here at $0.15
+        against a catalogue price of $0.0187.
 
-        This list is kept because it gives the pipeline a symbol and a pinout it
-        has been verified against, and because the platform must work with no
-        catalogue at all. It is **not** a purchasing list: every design is turned
-        into an order by :mod:`src.components.ordering`, which resolves each
-        value and package to a real catalogue part, records the LCSC number, and
-        says on the line when the part number changed.
+        A design built from these templates therefore names no part number. It has
+        a correct symbol, footprint and value, and
+        :mod:`src.components.ordering` resolves each one to a real, in-stock
+        catalogue part, records the LCSC number, and states on the line when the
+        part number it found is not the one the design implied.
 
-        Do not add a part number here that has not been checked against the real
-        catalogue. ``tests/test_ordering.py`` enforces the verified set.
+        Do not add a part number, a price or a stock figure here. If a value is
+        missing, add a template with a value and a package, and let the catalogue
+        say what it costs.
         """
-        self._fallback_catalog = [
-            # Regulators
+        self._component_templates = [
             ComponentSpec(
-                mpn="AMS1117-3.3",
-                manufacturer="Advanced Monolithic Systems",
-                category="regulator_ldo",
-                value="3.3V",
-                package="SOT-223",
-                symbol="Regulator_Linear:AMS1117-3.3",
-                footprint="Package_TO_SOT_SMD:SOT-223-3_TabPin2",
-                description="1A Low Dropout Voltage Regulator 3.3V",
-                stock=50000,
-                price=0.15,
-                attributes={"v_in_max": 15.0, "v_out": 3.3, "i_max": 1.0},
+                mpn="",
+                category='regulator_ldo',
+                value='3.3V',
+                package='SOT-223',
+                symbol='Regulator_Linear:AMS1117-3.3',
+                footprint='Package_TO_SOT_SMD:SOT-223-3_TabPin2',
+                description='1A Low Dropout Voltage Regulator 3.3V',
             ),
             ComponentSpec(
-                mpn="LM7805",
-                manufacturer="Texas Instruments",
-                category="regulator_ldo",
-                value="5V",
-                package="TO-220",
-                symbol="Regulator_Linear:LM7805",
-                footprint="Package_TO_SOT_THT:TO-220-3_Vertical",
-                description="1.5A Positive Voltage Regulator 5V",
-                stock=25000,
-                price=0.35,
-                attributes={"v_in_max": 35.0, "v_out": 5.0, "i_max": 1.5},
+                mpn="",
+                category='regulator_ldo',
+                value='5V',
+                package='TO-220',
+                symbol='Regulator_Linear:LM7805',
+                footprint='Package_TO_SOT_THT:TO-220-3_Vertical',
+                description='1.5A Positive Voltage Regulator 5V',
             ),
             ComponentSpec(
-                mpn="LM2596S-5.0",
-                manufacturer="Texas Instruments",
-                category="regulator_buck",
-                value="5V",
-                package="TO-220-5",
-                symbol="Regulator_Switching:LM2596",
-                footprint="Package_TO_SOT_THT:TO-220-5_Vertical",
-                description="3A Step-Down Switching Regulator 5V",
-                stock=10000,
-                price=0.85,
-                attributes={"v_in_max": 40.0, "v_out": 5.0, "i_max": 3.0},
+                mpn="",
+                category='regulator_buck',
+                value='5V',
+                package='TO-220-5',
+                symbol='Regulator_Switching:LM2596',
+                footprint='Package_TO_SOT_THT:TO-220-5_Vertical',
+                description='3A Step-Down Switching Regulator 5V',
             ),
             ComponentSpec(
-                mpn="MT3608",
-                manufacturer="Aerosemi",
-                category="regulator_boost",
-                value="Adjustable",
-                package="SOT-23-6",
-                symbol="Regulator_Switching:MT3608",
-                footprint="Package_TO_SOT_SMD:SOT-23-6",
-                description="2A Boost Converter, up to 28V output",
-                stock=50000,
-                price=0.18,
-                attributes={"v_in_max": 24.0, "v_out_max": 28.0, "i_max": 2.0},
-            ),
-            # Passives - Resistors
-            ComponentSpec(
-                mpn="RC0805FR-0710KL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="10k",
-                package="0805",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0805_2012Metric",
-                description="Resistor 10k Ohm 1% 1/8W 0805",
-                stock=200000,
-                price=0.01,
-                attributes={"power_rating": 0.125, "tolerance": "1%"},
+                mpn="",
+                category='regulator_boost',
+                value='Adjustable',
+                package='SOT-23-6',
+                symbol='Regulator_Switching:MT3608',
+                footprint='Package_TO_SOT_SMD:SOT-23-6',
+                description='2A Boost Converter, up to 28V output',
             ),
             ComponentSpec(
-                mpn="RC0805FR-07330RL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="330",
-                package="0805",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0805_2012Metric",
-                description="Resistor 330 Ohm 1% 1/8W 0805",
-                stock=200000,
-                price=0.01,
-                attributes={"power_rating": 0.125, "tolerance": "1%"},
+                mpn="",
+                category='resistor',
+                value='10k',
+                package='0805',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0805_2012Metric',
+                description='Resistor 10k Ohm 1% 1/8W 0805',
             ),
             ComponentSpec(
-                mpn="RC0603FR-0710KL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="10k",
-                package="0603",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0603_1608Metric",
-                description="Resistor 10k Ohm 1% 1/10W 0603",
-                stock=200000,
-                price=0.008,
-                attributes={"power_rating": 0.1, "tolerance": "1%"},
+                mpn="",
+                category='resistor',
+                value='330',
+                package='0805',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0805_2012Metric',
+                description='Resistor 330 Ohm 1% 1/8W 0805',
             ),
             ComponentSpec(
-                mpn="RC0603FR-07240RL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="240",
-                package="0603",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0603_1608Metric",
-                description="Resistor 240 Ohm 1% 1/10W 0603",
-                stock=180000,
-                price=0.008,
-                attributes={"power_rating": 0.1, "tolerance": "1%"},
+                mpn="",
+                category='resistor',
+                value='10k',
+                package='0603',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0603_1608Metric',
+                description='Resistor 10k Ohm 1% 1/10W 0603',
             ),
             ComponentSpec(
-                mpn="RC0603FR-071KL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="1k",
-                package="0603",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0603_1608Metric",
-                description="Resistor 1k Ohm 1% 1/10W 0603",
-                stock=180000,
-                price=0.008,
-                attributes={"power_rating": 0.1, "tolerance": "1%"},
+                mpn="",
+                category='resistor',
+                value='240',
+                package='0603',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0603_1608Metric',
+                description='Resistor 240 Ohm 1% 1/10W 0603',
             ),
             ComponentSpec(
-                mpn="RC0402FR-0710KL",
-                manufacturer="Yageo",
-                category="resistor",
-                value="10k",
-                package="0402",
-                symbol="Device:R",
-                footprint="Resistor_SMD:R_0402_1005Metric",
-                description="Resistor 10k Ohm 1% 1/16W 0402",
-                stock=200000,
-                price=0.006,
-                attributes={"power_rating": 0.0625, "tolerance": "1%"},
-            ),
-            # Passives - Capacitors
-            ComponentSpec(
-                mpn="CC0805KRX7R9BB106",
-                manufacturer="Yageo",
-                category="capacitor",
-                value="10uF",
-                package="0805",
-                symbol="Device:C",
-                footprint="Capacitor_SMD:C_0805_2012Metric",
-                description="Capacitor MLCC 10uF 25V X7R 0805",
-                stock=100000,
-                price=0.02,
-                attributes={"voltage_rating": 25.0, "dielectric": "X7R"},
+                mpn="",
+                category='resistor',
+                value='1k',
+                package='0603',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0603_1608Metric',
+                description='Resistor 1k Ohm 1% 1/10W 0603',
             ),
             ComponentSpec(
-                mpn="CC0805KRX5R7BB226",
-                manufacturer="Yageo",
-                category="capacitor",
-                value="22uF",
-                package="0805",
-                symbol="Device:C",
-                footprint="Capacitor_SMD:C_0805_2012Metric",
-                description="Capacitor MLCC 22uF 16V X5R 0805",
-                stock=80000,
-                price=0.03,
-                attributes={"voltage_rating": 16.0, "dielectric": "X5R"},
+                mpn="",
+                category='resistor',
+                value='10k',
+                package='0402',
+                symbol='Device:R',
+                footprint='Resistor_SMD:R_0402_1005Metric',
+                description='Resistor 10k Ohm 1% 1/16W 0402',
             ),
             ComponentSpec(
-                mpn="CC0603KRX7R9BB104",
-                manufacturer="Yageo",
-                category="capacitor",
-                value="100nF",
-                package="0603",
-                symbol="Device:C",
-                footprint="Capacitor_SMD:C_0603_1608Metric",
-                description="Capacitor MLCC 100nF 50V X7R 0603",
-                stock=200000,
-                price=0.01,
-                attributes={"voltage_rating": 50.0, "dielectric": "X7R"},
+                mpn="",
+                category='capacitor',
+                value='10uF',
+                package='0805',
+                symbol='Device:C',
+                footprint='Capacitor_SMD:C_0805_2012Metric',
+                description='Capacitor MLCC 10uF 25V X7R 0805',
             ),
             ComponentSpec(
-                mpn="CC0402KRX7R8BB104",
-                manufacturer="Yageo",
-                category="capacitor",
-                value="100nF",
-                package="0402",
-                symbol="Device:C",
-                footprint="Capacitor_SMD:C_0402_1005Metric",
-                description="Capacitor MLCC 100nF 25V X7R 0402",
-                stock=200000,
-                price=0.008,
-                attributes={"voltage_rating": 25.0, "dielectric": "X7R"},
-            ),
-            # LEDs
-            ComponentSpec(
-                mpn="LTST-C190KGKT",
-                manufacturer="Lite-On",
-                category="led",
-                value="Green",
-                package="0805",
-                symbol="Device:LED",
-                footprint="LED_SMD:LED_0805_2012Metric",
-                description="LED Green Clear 0805 SMD",
-                stock=150000,
-                price=0.04,
-                attributes={"forward_voltage": 2.1, "current_ma": 20, "wavelength_nm": 570},
+                mpn="",
+                category='capacitor',
+                value='22uF',
+                package='0805',
+                symbol='Device:C',
+                footprint='Capacitor_SMD:C_0805_2012Metric',
+                description='Capacitor MLCC 22uF 16V X5R 0805',
             ),
             ComponentSpec(
-                mpn="LTST-C190KRKT",
-                manufacturer="Lite-On",
-                category="led",
-                value="Red",
-                package="0805",
-                symbol="Device:LED",
-                footprint="LED_SMD:LED_0805_2012Metric",
-                description="LED Red Clear 0805 SMD",
-                stock=150000,
-                price=0.04,
-                attributes={"forward_voltage": 2.0, "current_ma": 20, "wavelength_nm": 625},
+                mpn="",
+                category='capacitor',
+                value='100nF',
+                package='0603',
+                symbol='Device:C',
+                footprint='Capacitor_SMD:C_0603_1608Metric',
+                description='Capacitor MLCC 100nF 50V X7R 0603',
             ),
             ComponentSpec(
-                mpn="LTST-C190KSKT",
-                manufacturer="Lite-On",
-                category="led",
-                value="Blue",
-                package="0805",
-                symbol="Device:LED",
-                footprint="LED_SMD:LED_0805_2012Metric",
-                description="LED Blue Clear 0805 SMD",
-                stock=100000,
-                price=0.06,
-                attributes={"forward_voltage": 3.2, "current_ma": 20, "wavelength_nm": 470},
-            ),
-            # Microcontrollers
-            ComponentSpec(
-                mpn="ESP32-WROOM-32E",
-                manufacturer="Espressif Systems",
-                category="microcontroller",
-                value="ESP32",
-                package="Module",
-                symbol="RF_Module:ESP32-WROOM-32",
-                footprint="RF_Module:ESP32-WROOM-32",
-                description="Wi-Fi & Bluetooth MCU Module",
-                stock=30000,
-                price=2.80,
-                attributes={"voltage": 3.3, "wifi": True, "bluetooth": True, "cores": 2},
+                mpn="",
+                category='capacitor',
+                value='100nF',
+                package='0402',
+                symbol='Device:C',
+                footprint='Capacitor_SMD:C_0402_1005Metric',
+                description='Capacitor MLCC 100nF 25V X7R 0402',
             ),
             ComponentSpec(
-                mpn="STM32F103C8T6",
-                manufacturer="STMicroelectronics",
-                category="microcontroller",
-                value="STM32F103",
-                package="LQFP-48",
-                symbol="MCU_ST_STM32F1:STM32F103C8T6",
-                footprint="Package_QFP:LQFP-48_7x7mm_P0.5mm",
-                description="ARM Cortex-M3 MCU 72MHz 64KB Flash",
-                stock=5000,
-                price=1.85,
-                attributes={"voltage": 3.3, "flash_kb": 64, "ram_kb": 20, "speed_mhz": 72},
+                mpn="",
+                category='led',
+                value='Green',
+                package='0805',
+                symbol='Device:LED',
+                footprint='LED_SMD:LED_0805_2012Metric',
+                description='LED Green Clear 0805 SMD',
             ),
             ComponentSpec(
-                mpn="RP2040",
-                manufacturer="Raspberry Pi",
-                category="microcontroller",
-                value="RP2040",
-                package="QFN-56",
-                symbol="MCU_RaspberryPi:RP2040",
-                footprint="Package_QFN:QFN-56_7x7mm_P0.5mm",
-                description="Dual ARM Cortex-M0+ MCU",
-                stock=20000,
-                price=0.80,
-                attributes={"voltage": 3.3, "cores": 2, "speed_mhz": 133},
-            ),
-            # Inductors
-            ComponentSpec(
-                mpn="SRN6045-470M",
-                manufacturer="Bourns",
-                category="inductor",
-                value="47uH",
-                package="1210",
-                symbol="Device:L",
-                footprint="Inductor_SMD:L_1210_3225Metric",
-                description="47uH 1.6A Shielded Power Inductor",
-                stock=40000,
-                price=0.22,
-                attributes={"inductance_uh": 47.0, "i_sat_a": 1.6, "dcr_ohm": 0.12},
+                mpn="",
+                category='led',
+                value='Red',
+                package='0805',
+                symbol='Device:LED',
+                footprint='LED_SMD:LED_0805_2012Metric',
+                description='LED Red Clear 0805 SMD',
             ),
             ComponentSpec(
-                mpn="SRN4018-100M",
-                manufacturer="Bourns",
-                category="inductor",
-                value="10uH",
-                package="0805",
-                symbol="Device:L",
-                footprint="Inductor_SMD:L_0805_2012Metric",
-                description="10uH 1.1A Shielded Power Inductor",
-                stock=45000,
-                price=0.18,
-                attributes={"inductance_uh": 10.0, "i_sat_a": 1.1, "dcr_ohm": 0.15},
-            ),
-            # Diodes
-            ComponentSpec(
-                mpn="1N4148W",
-                manufacturer="Vishay",
-                category="diode",
-                value="1N4148",
-                package="SOD-123",
-                symbol="Device:D",
-                footprint="Diode_SMD:D_SOD-123",
-                description="Fast Switching Diode 100V 300mA",
-                stock=100000,
-                price=0.015,
-                attributes={"v_reverse": 100, "i_forward": 0.3},
+                mpn="",
+                category='led',
+                value='Blue',
+                package='0805',
+                symbol='Device:LED',
+                footprint='LED_SMD:LED_0805_2012Metric',
+                description='LED Blue Clear 0805 SMD',
             ),
             ComponentSpec(
-                mpn="SS14",
-                manufacturer="Vishay",
-                category="diode",
-                value="SS14",
-                package="SMA",
-                symbol="Device:D",
-                footprint="Diode_SMD:D_SMA",
-                description="Schottky Rectifier 40V 1A",
-                stock=50000,
-                price=0.03,
-                attributes={"v_reverse": 40, "i_forward": 1.0, "vf_max": 0.55},
-            ),
-            # Transistors
-            ComponentSpec(
-                mpn="2N7002",
-                manufacturer="Nexperia",
-                category="mosfet",
-                value="2N7002",
-                package="SOT-23",
-                symbol="Transistor_FET:Q_NMOS_GSD",
-                footprint="Package_TO_SOT_SMD:SOT-23-3",
-                description="N-Channel MOSFET 60V 115mA",
-                stock=100000,
-                price=0.025,
-                attributes={"v_ds": 60, "i_d": 0.115, "r_ds_on": 7.5},
+                mpn="",
+                category='microcontroller',
+                value='ESP32',
+                package='Module',
+                symbol='RF_Module:ESP32-WROOM-32',
+                footprint='RF_Module:ESP32-WROOM-32',
+                description='Wi-Fi & Bluetooth MCU Module',
             ),
             ComponentSpec(
-                mpn="SI2302",
-                manufacturer="Vishay",
-                category="mosfet",
-                value="SI2302",
-                package="SOT-23",
-                symbol="Transistor_FET:Q_NMOS_GSD",
-                footprint="Package_TO_SOT_SMD:SOT-23-3",
-                description="N-Channel MOSFET 20V 2.3A",
-                stock=50000,
-                price=0.05,
-                attributes={"v_ds": 20, "i_d": 2.3, "r_ds_on": 0.065},
-            ),
-            # OpAmps
-            ComponentSpec(
-                mpn="LM358",
-                manufacturer="Texas Instruments",
-                category="opamp",
-                value="LM358",
-                package="SOIC-8",
-                symbol="Amplifier_Operational:LM358",
-                footprint="Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
-                description="Dual Operational Amplifier",
-                stock=50000,
-                price=0.12,
-                attributes={"channels": 2, "gbw_mhz": 1, "v_supply_max": 32},
+                mpn="",
+                category='microcontroller',
+                value='STM32F103',
+                package='LQFP-48',
+                symbol='MCU_ST_STM32F1:STM32F103C8T6',
+                footprint='Package_QFP:LQFP-48_7x7mm_P0.5mm',
+                description='ARM Cortex-M3 MCU 72MHz 64KB Flash',
             ),
             ComponentSpec(
-                mpn="TL072",
-                manufacturer="Texas Instruments",
-                category="opamp",
-                value="TL072",
-                package="SOIC-8",
-                symbol="Amplifier_Operational:TL072",
-                footprint="Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
-                description="Dual JFET-Input OpAmp Low Noise",
-                stock=30000,
-                price=0.25,
-                attributes={"channels": 2, "gbw_mhz": 3, "v_supply_max": 36, "noise_nVrtHz": 18},
-            ),
-            # Voltage References
-            ComponentSpec(
-                mpn="TL431",
-                manufacturer="Texas Instruments",
-                category="voltage_reference",
-                value="TL431",
-                package="SOT-23",
-                symbol="Reference_Voltage:TL431DBZ",
-                footprint="Package_TO_SOT_SMD:SOT-23-3",
-                description="Programmable Precision Reference 2.5V",
-                stock=50000,
-                price=0.08,
-                attributes={"v_ref": 2.5, "accuracy": "0.5%"},
-            ),
-            # Crystals
-            ComponentSpec(
-                mpn="8MHz",
-                manufacturer="Generic",
-                category="crystal",
-                value="8MHz",
-                package="HC-49S",
-                symbol="Device:Crystal",
-                footprint="Crystal:Crystal_SMD_HC49-SD",
-                description="8MHz Crystal 20pF",
-                stock=10000,
-                price=0.15,
-                attributes={"frequency_mhz": 8, "load_pf": 20},
+                mpn="",
+                category='microcontroller',
+                value='RP2040',
+                package='QFN-56',
+                symbol='MCU_RaspberryPi:RP2040',
+                footprint='Package_DFN_QFN:QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm',
+                description='Dual ARM Cortex-M0+ MCU',
             ),
             ComponentSpec(
-                mpn="16MHz",
-                manufacturer="Generic",
-                category="crystal",
-                value="16MHz",
-                package="HC-49S",
-                symbol="Device:Crystal",
-                footprint="Crystal:Crystal_SMD_HC49-SD",
-                description="16MHz Crystal 20pF",
-                stock=10000,
-                price=0.15,
-                attributes={"frequency_mhz": 16, "load_pf": 20},
-            ),
-            # Regulators (additional)
-            ComponentSpec(
-                mpn="LM317L",
-                manufacturer="Texas Instruments",
-                category="regulator_ldo",
-                value="Adjustable",
-                package="TO-92",
-                symbol="Regulator_Linear:LM317L",
-                footprint="Package_TO_SOT_THT:TO-92_Inline",
-                description="100mA Adjustable Positive Voltage Regulator",
-                stock=30000,
-                price=0.25,
-                attributes={"v_out_min": 1.25, "v_out_max": 37.0, "i_max": 0.1},
+                mpn="",
+                category='inductor',
+                value='47uH',
+                package='1210',
+                symbol='Device:L',
+                footprint='Inductor_SMD:L_1210_3225Metric',
+                description='47uH 1.6A Shielded Power Inductor',
             ),
             ComponentSpec(
-                mpn="LM337L",
-                manufacturer="Texas Instruments",
-                category="regulator_ldo",
-                value="Adjustable",
-                package="TO-92",
-                symbol="Regulator_Linear:LM337L",
-                footprint="Package_TO_SOT_THT:TO-92_Inline",
-                description="100mA Adjustable Negative Voltage Regulator",
-                stock=25000,
-                price=0.30,
-                attributes={"v_out_min": -37.0, "v_out_max": -1.25, "i_max": 0.1},
-            ),
-            # Op-amps (additional)
-            ComponentSpec(
-                mpn="OPA2134PA",
-                manufacturer="Texas Instruments",
-                category="opamp",
-                value="OPA2134",
-                package="DIP-8",
-                symbol="Amplifier_Operational:LM358",
-                footprint="Package_DIP:DIP-8_W7.62mm",
-                description="Dual Low-Noise Audio Op-Amp",
-                stock=8000,
-                price=3.50,
-                attributes={"channels": 2, "noise_nv": 8},
-            ),
-            # Connectors
-            ComponentSpec(
-                mpn="RCA-2P",
-                manufacturer="CUI Devices",
-                category="connector",
-                value="RCA Jack",
-                package="PTH",
-                symbol="Connector:Conn_Coaxial",
-                footprint="Connector_Coaxial:RCA_Amphenol_13-70700-1_Horizontal",
-                description="RCA Phono Jack, PCB mount",
-                stock=20000,
-                price=0.65,
-                attributes={"contacts": 2},
+                mpn="",
+                category='inductor',
+                value='10uH',
+                package='0805',
+                symbol='Device:L',
+                footprint='Inductor_SMD:L_0805_2012Metric',
+                description='10uH 1.1A Shielded Power Inductor',
             ),
             ComponentSpec(
-                mpn="PJ-002AH",
-                manufacturer="CUI Devices",
-                category="connector",
-                value="DC Jack",
-                package="PTH",
-                symbol="Connector:Barrel_Jack",
-                footprint="Connector_BarrelJack:BarrelJack_Horizontal",
-                description="Barrel Power Jack 5.5/2.1mm",
-                stock=15000,
-                price=0.45,
-                attributes={"contacts": 3},
+                mpn="",
+                category='diode',
+                value='1N4148',
+                package='SOD-123',
+                symbol='Device:D',
+                footprint='Diode_SMD:D_SOD-123',
+                description='Fast Switching Diode 100V 300mA',
             ),
             ComponentSpec(
-                mpn="9V_CLIP",
-                manufacturer="Keystone",
-                category="connector",
-                value="9V Battery Clip",
-                package="PTH",
-                symbol="Connector:Conn_01x02_Socket",
-                footprint="Connector_Wire:SolderWire-0.5sqmm_1x02_P4.6mm_D1.6mm_OD3mm",
-                description="9V Battery Snap Connector",
-                stock=12000,
-                price=0.35,
-                attributes={"contacts": 2},
+                mpn="",
+                category='diode',
+                value='SS14',
+                package='SMA',
+                symbol='Device:D',
+                footprint='Diode_SMD:D_SMA',
+                description='Schottky Rectifier 40V 1A',
             ),
-            # Switches
             ComponentSpec(
-                mpn="GT21MCBE",
-                manufacturer="C&K",
-                category="switch",
-                value="DPDT",
-                package="PTH",
-                symbol="Switch:SW_DPDT_x2",
-                footprint="Button_Switch_THT:SW_DPDT_GT21MCBE",
-                description="DPDT Toggle Switch, On-On",
-                stock=9000,
-                price=1.10,
-                attributes={"positions": 2, "poles": 2},
+                mpn="",
+                category='mosfet',
+                value='2N7002',
+                package='SOT-23',
+                symbol='Transistor_FET:Q_NMOS_GSD',
+                footprint='Package_TO_SOT_SMD:SOT-23-3',
+                description='N-Channel MOSFET 60V 115mA',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='mosfet',
+                value='SI2302',
+                package='SOT-23',
+                symbol='Transistor_FET:Q_NMOS_GSD',
+                footprint='Package_TO_SOT_SMD:SOT-23-3',
+                description='N-Channel MOSFET 20V 2.3A',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='opamp',
+                value='LM358',
+                package='SOIC-8',
+                symbol='Amplifier_Operational:LM358',
+                footprint='Package_SO:SOIC-8_3.9x4.9mm_P1.27mm',
+                description='Dual Operational Amplifier',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='opamp',
+                value='TL072',
+                package='SOIC-8',
+                symbol='Amplifier_Operational:TL072',
+                footprint='Package_SO:SOIC-8_3.9x4.9mm_P1.27mm',
+                description='Dual JFET-Input OpAmp Low Noise',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='voltage_reference',
+                value='TL431',
+                package='SOT-23',
+                symbol='Reference_Voltage:TL431DBZ',
+                footprint='Package_TO_SOT_SMD:SOT-23-3',
+                description='Programmable Precision Reference 2.5V',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='crystal',
+                value='8MHz',
+                package='HC-49S',
+                symbol='Device:Crystal',
+                footprint='Crystal:Crystal_SMD_HC49-SD',
+                description='8MHz Crystal 20pF',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='crystal',
+                value='16MHz',
+                package='HC-49S',
+                symbol='Device:Crystal',
+                footprint='Crystal:Crystal_SMD_HC49-SD',
+                description='16MHz Crystal 20pF',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='regulator_ldo',
+                value='Adjustable',
+                package='TO-92',
+                symbol='Regulator_Linear:LM317L',
+                footprint='Package_TO_SOT_THT:TO-92_Inline',
+                description='100mA Adjustable Positive Voltage Regulator',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='regulator_ldo',
+                value='Adjustable',
+                package='TO-92',
+                symbol='Regulator_Linear:LM337L',
+                footprint='Package_TO_SOT_THT:TO-92_Inline',
+                description='100mA Adjustable Negative Voltage Regulator',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='opamp',
+                value='OPA2134',
+                package='DIP-8',
+                symbol='Amplifier_Operational:LM358',
+                footprint='Package_DIP:DIP-8_W7.62mm',
+                description='Dual Low-Noise Audio Op-Amp',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='connector',
+                value='DC Jack',
+                package='PTH',
+                symbol='Connector:Barrel_Jack',
+                footprint='Connector_BarrelJack:BarrelJack_Horizontal',
+                description='Barrel Power Jack 5.5/2.1mm',
+            ),
+            ComponentSpec(
+                mpn="",
+                category='switch',
+                value='DPDT',
+                package='PTH',
+                symbol='Switch:SW_DPDT_x2',
+                footprint='Button_Switch_SMD:SW_DPDT_CK_JS202011JCQN',
+                description='DPDT Toggle Switch, On-On',
             ),
         ]
 
@@ -680,14 +489,23 @@ class ComponentDatabase:
         """Total number of parts in active catalog."""
         if self.using_jlcparts:
             return self._jlcparts_db.count()
-        return len(self._fallback_catalog)
+        return len(self._component_templates)
 
     @property
     def data_source(self) -> str:
-        """Description of active data source."""
+        """
+        Description of the active data source.
+
+        Without the catalogue this says "templates", not "catalog": there are no
+        part numbers, prices or stock figures to offer, and describing them as a
+        catalog would be the same overstatement in a different place.
+        """
         if self.using_jlcparts:
             return f"JLCPCB/LCSC offline catalog ({self.catalog_size:,} parts)"
-        return f"Built-in fallback catalog ({len(self._fallback_catalog)} parts)"
+        return (
+            f"{len(self._component_templates)} component templates — no part "
+            f"numbers, prices or stock; run 'catalog-setup'"
+        )
 
     def search(
         self,
@@ -723,8 +541,8 @@ class ComponentDatabase:
             if jlc_results:
                 return [self._jlcpart_to_spec(p) for p in jlc_results]
 
-        # Fallback to built-in catalog
-        return self._search_fallback(query, category, package, min_stock, limit)
+        # Fall back to the templates
+        return self._search_templates(query, category, package, min_stock, limit)
 
     def search_explained(
         self,
@@ -743,13 +561,16 @@ class ComponentDatabase:
         presenting a list the user has to take on trust.
         """
         if not self.using_jlcparts:
-            components = self._search_fallback(
+            components = self._search_templates(
                 query, category, package, min_stock, limit
             )
             return {
                 "components": [c.to_dict() for c in components],
-                "notes": ["Using the built-in fallback catalog; "
-                          "run 'catalog-setup' for the full catalog"],
+                "notes": [
+                    "These are component templates: symbol, footprint and value, "
+                    "with no part number, price or stock. Run 'catalog-setup' to "
+                    "search real, orderable parts."
+                ],
                 "interpretation": query,
                 "source": self.data_source,
             }
@@ -804,9 +625,9 @@ class ComponentDatabase:
 
         The catalogue is consulted first and matches on the part number itself,
         not on a text search that happens to rank the right part first. The
-        built-in list is the fallback, and callers that must not use a
-        placeholder part should check ``ComponentSpec.lcsc_part`` before
-        treating the result as orderable.
+        templates are the fallback, and they carry no part number at all, so a
+        caller that needs an orderable part must check
+        ``ComponentSpec.lcsc_part`` before treating the result as one.
         """
         if self.using_jlcparts:
             if mpn.upper().startswith("C") and mpn[1:].isdigit():
@@ -818,7 +639,7 @@ class ComponentDatabase:
             if exact:
                 return self._jlcpart_to_spec(exact[0])
 
-        for part in self._fallback_catalog:
+        for part in self._component_templates:
             if part.mpn.lower() == mpn.lower():
                 return part
         return None
@@ -827,9 +648,8 @@ class ComponentDatabase:
         """
         Every catalogue entry with this exact MPN, best stock first.
 
-        Separate from :meth:`get_by_mpn` because that one falls back to the
-        built-in list, whose part numbers are placeholders that no distributor
-        stocks. Turning a design into an order needs to know the difference.
+        Consults the catalogue only, so a caller that must not accept a template
+        can ask this question. Templates carry no part numbers in any case.
         """
         if not self.using_jlcparts:
             return []
@@ -843,25 +663,23 @@ class ComponentDatabase:
                 return self._jlcpart_to_spec(jlc_part)
         return None
 
-    def find_builtin(
+    def find_template(
         self,
         category: str,
         value: Optional[str] = None,
         package: Optional[str] = None,
     ) -> Optional[ComponentSpec]:
         """
-        Look up a part in the curated built-in list only.
+        Look up a component template by category, value and package.
 
-        The built-in list is small, but its parts carry symbols and pinouts the
-        rest of the pipeline has been checked against. Template circuits use it
-        deliberately: when a design calls for "a 10 µF 0805 capacitor", taking
-        the curated one is safer than taking whichever 10 µF part the downloaded
-        catalog happens to rank first.
+        Templates carry the symbol and footprint the pipeline has been checked
+        against, so a design that asks for "a 10 µF 0805 capacitor" gets a correct
+        land pattern whether or not a catalogue is installed.
 
         Returns ``None`` when nothing matches, so the caller can fall back to a
-        catalog search rather than silently using a different value.
+        catalogue search rather than silently using a different value.
         """
-        for part in self._fallback_catalog:
+        for part in self._component_templates:
             if category and part.category != category:
                 continue
             if value and part.value.lower() != value.lower():
@@ -934,13 +752,13 @@ class ComponentDatabase:
             # refined categories (zener, supervisor, voltage_reference) that the
             # catalogue's own broader leaves do not distinguish.
             return sorted(self._jlcparts_db.internal_category_counts())
-        return sorted({part.category for part in self._fallback_catalog})
+        return sorted({part.category for part in self._component_templates})
 
     def internal_category_counts(self) -> Dict[str, int]:
         """Counts by this platform's categories, from the downloaded catalogue."""
         if not self.using_jlcparts:
             counts: Dict[str, int] = {}
-            for part in self._fallback_catalog:
+            for part in self._component_templates:
                 counts[part.category] = counts.get(part.category, 0) + 1
             return counts
         return self._jlcparts_db.internal_category_counts()
@@ -1032,7 +850,7 @@ class ComponentDatabase:
             prices=[dict(tier) for tier in jlc.prices],
         )
 
-    def _search_fallback(
+    def _search_templates(
         self,
         query: str,
         category: Optional[str],
@@ -1040,24 +858,28 @@ class ComponentDatabase:
         min_stock: int,
         limit: int
     ) -> List[ComponentSpec]:
-        """Search built-in fallback catalog."""
+        """
+        Search the component templates.
+
+        There is no part number, manufacturer or stock to match on or filter by,
+        because templates do not have any. ``min_stock`` is accepted and ignored
+        for the same reason: filtering on a stock figure that does not exist
+        would silently return nothing.
+        """
         results = []
         q = query.lower().strip()
 
-        for part in self._fallback_catalog:
+        for part in self._component_templates:
             if category and part.category != category:
                 continue
             if package and part.package.lower() != package.lower():
                 continue
-            if part.stock < min_stock:
-                continue
 
             if not q or (
-                q in part.mpn.lower()
-                or q in part.manufacturer.lower()
-                or q in part.value.lower()
+                q in part.value.lower()
                 or q in part.description.lower()
                 or q in part.category.lower()
+                or q in part.package.lower()
             ):
                 results.append(part)
 

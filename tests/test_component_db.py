@@ -12,36 +12,53 @@ from src.components.database import ComponentDatabase
 def test_component_db_search():
     db = ComponentDatabase()
 
-    results = db.search("AMS1117")
-    assert len(results) >= 1
-    # Every result is an AMS1117 variant. Which variant comes first depends on
-    # the catalogue — a Preferred part outranks a bigger-stock one, because
-    # Preferred parts avoid JLCPCB's extended-part handling — so the ordering is
-    # asserted as a property, not as one part number.
-    assert all("AMS1117" in part.mpn.upper() for part in results)
-    if any(part.is_preferred for part in results):
-        assert results[0].is_preferred
+    if db.using_jlcparts:
+        results = db.search("AMS1117")
+        assert len(results) >= 1
+        # Every result is an AMS1117 variant. Which variant comes first depends
+        # on the catalogue — a Preferred part outranks a bigger-stock one,
+        # because Preferred parts avoid JLCPCB's extended-part handling — so the
+        # ordering is asserted as a property, not as one part number.
+        assert all("AMS1117" in part.mpn.upper() for part in results)
+        if any(part.is_preferred for part in results):
+            assert results[0].is_preferred
+
+        # "ESP32-WROOM-32E" was one of the invented part numbers this project
+        # used to ship. It is not in the catalogue, so the honest answer is that
+        # it does not resolve; a real ESP32 module is found by searching.
+        assert db.get_by_mpn("ESP32-WROOM-32E") is None
+        modules = db.search("ESP32", limit=5)
+        assert modules
+        assert all(module.lcsc_part for module in modules)
+    else:
+        # Without the catalogue the search covers the templates: values and
+        # packages, no part numbers.
+        results = db.search("10k", category="resistor")
+        assert results
+        assert all(part.mpn == "" for part in results)
+        assert all(part.lcsc_part is None for part in results)
 
     ldos = db.search(category="regulator_ldo")
     assert len(ldos) >= 1
 
-    mcu = db.get_by_mpn("ESP32-WROOM-32E")
-    assert mcu is not None
-    assert mcu.category == "microcontroller"
-
 
 def test_component_db_get_by_mpn():
+    """
+    Part-number lookup consults the catalogue, and only the catalogue.
+
+    The built-in templates have no part numbers, so a lookup for one of the
+    numbers this project used to invent (``CC0805KRX7R9BB106``) must return
+    nothing rather than a template wearing that number.
+    """
     db = ComponentDatabase()
-    # Test with the real Yageo MPN from fallback catalog
-    res = db.get_by_mpn("CC0805KRX7R9BB106")
-    assert res is not None
-    assert res.value == "10uF"
-    assert res.package == "0805"
-    
-    # Also test with AMS1117
-    res2 = db.get_by_mpn("AMS1117-3.3")
-    assert res2 is not None
-    assert res2.category == "regulator_ldo"
+    assert db.get_by_mpn("CC0805KRX7R9BB106") is None
+
+    # A real part number is found when the catalogue is installed.
+    res = db.get_by_mpn("AMS1117-3.3")
+    if db.using_jlcparts:
+        assert res is not None
+        assert res.category == "regulator_ldo"
+        assert res.lcsc_part is not None
 
 class TestCatalogDownload:
     """
@@ -147,42 +164,60 @@ class TestCatalogDownload:
         assert JLCPartsDatabase()._find_catalog() == catalog
 
 
-class TestBuiltinLookup:
+class TestTemplateLookup:
     """
-    Template circuits pick their parts from the curated built-in list.
+    Template circuits pick their parts from the component templates.
 
-    The distinction matters: a curated part has a symbol and pinout the rest of
-    the pipeline has been checked against, while "whichever catalog part ranks
+    The distinction matters: a template carries a symbol and footprint the rest
+    of the pipeline has been checked against, while "whichever catalog part ranks
     first" does not. An earlier version of the orchestrator used the latter and
     silently put a 100 nF capacitor where a 10 µF input capacitor was intended.
     """
 
-    def test_finds_a_builtin_part_by_value(self):
+    def test_finds_a_template_by_value(self):
         db = ComponentDatabase()
-        part = db.find_builtin("capacitor", value="10uF")
+        part = db.find_template("capacitor", value="10uF")
         assert part is not None
         assert part.value == "10uF"
-        assert part.mpn == "CC0805KRX7R9BB106"
 
-    def test_a_builtin_part_has_no_lcsc_number(self):
-        """Which is how a caller can tell it came from the built-in list."""
+    def test_a_template_carries_no_parts_data(self):
+        """
+        No part number, manufacturer, price or stock: those are the catalogue's
+        job, and the second copy is what produced 28 invented part numbers.
+        """
         db = ComponentDatabase()
-        part = db.find_builtin("resistor", value="330")
+        part = db.find_template("resistor", value="330")
         assert part is not None
+        assert part.mpn == ""
+        assert part.manufacturer == ""
+        assert part.price == 0.0
+        assert part.stock == 0
         assert part.lcsc_part is None
+
+    def test_a_template_still_carries_the_land_pattern(self):
+        """Which is the whole reason to keep it."""
+        db = ComponentDatabase()
+        part = db.find_template("resistor", value="330", package="0805")
+        assert part.symbol == "Device:R"
+        assert part.footprint == "Resistor_SMD:R_0805_2012Metric"
 
     def test_package_narrows_the_match(self):
         db = ComponentDatabase()
-        assert db.find_builtin("resistor", value="10k", package="0402").mpn == (
-            "RC0402FR-0710KL"
-        )
+        found = db.find_template("resistor", value="10k", package="0402")
+        assert found is not None
+        assert found.footprint == "Resistor_SMD:R_0402_1005Metric"
 
     def test_a_value_that_is_not_there_returns_none(self):
         """Returning a different value instead would be worse than returning nothing."""
         db = ComponentDatabase()
-        assert db.find_builtin("capacitor", value="47uF") is None
-        assert db.find_builtin("resistor", value="4k7") is None
+        assert db.find_template("capacitor", value="47uF") is None
+        assert db.find_template("resistor", value="4k7") is None
 
     def test_an_unknown_category_returns_none(self):
         db = ComponentDatabase()
-        assert db.find_builtin("nonexistent_category") is None
+        assert db.find_template("nonexistent_category") is None
+
+    def test_the_data_source_says_templates_not_catalog(self):
+        db = ComponentDatabase(prefer_jlcparts=False)
+        assert "template" in db.data_source
+        assert "no part numbers" in db.data_source

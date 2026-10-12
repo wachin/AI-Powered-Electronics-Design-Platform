@@ -207,7 +207,12 @@ class TestCircuitSpecificationGenerator:
 
         reg = next((c for c in spec.components if c.role == "regulator"), None)
         assert reg is not None
-        assert reg.mpn == "AMS1117-3.3"
+        # The fallback specification names the value and package, not a part
+        # number: the repo carries no part numbers of its own, so the design
+        # cannot claim one it cannot support.
+        assert reg.mpn == ""
+        assert reg.value == "3.3V"
+        assert reg.package == "SOT-223"
 
     @pytest.mark.asyncio
     async def test_buck_specification(self):

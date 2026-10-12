@@ -126,11 +126,14 @@ class CircuitSpecification:
 @dataclass
 class ComponentSpec:
     role: str          # regulator, controller, inductor, input_capacitor, etc.
-    mpn: str           # Manufacturer Part Number (e.g., "LM2596S-5.0")
-    manufacturer: str  # TI, AMS, Yageo, etc.
-    value: str         # 5V, 47uH, 10uF, etc.
+    mpn: str           # Manufacturer Part Number, or "" when the design names none
+    value: str         # 3.3V, 47uH, 10uF, 330, Green, etc.
     package: str       # SOT-223, TO-220-5, 0805, etc.
     reasoning: str     # Design rationale
+
+# The design names a part number only when it is a real catalogue part. Otherwise
+# it names the value and package, and the purchase list resolves the real part:
+# the repo carries no part numbers of its own.
 ```
 
 **Features:**

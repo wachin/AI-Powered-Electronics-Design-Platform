@@ -376,11 +376,12 @@ class AIDesignOrchestrator:
 
         Order of preference:
 
-        1. The curated built-in part matching ``value``, because its symbol and
-           pinout have been checked against the rest of the pipeline.
-        2. A downloaded-catalog part found by *value* (a real part with stock
+        1. The component template matching ``value``, because its symbol and
+           footprint have been checked against the rest of the pipeline. A
+           template has no part number: the purchase list resolves the real one.
+        2. A downloaded-catalogue part found by *value* (a real part with stock
            and a datasheet).
-        3. A downloaded-catalog part found by category alone, as a last resort.
+        3. A downloaded-catalogue part found by category alone, as a last resort.
 
         Raises:
             LookupError: if nothing is available at all. Returning a wrong part
@@ -388,7 +389,7 @@ class AIDesignOrchestrator:
                 whereas a wrong value is discovered after the boards arrive.
         """
         if value:
-            builtin = self.db.find_builtin(category, value=value)
+            builtin = self.db.find_template(category, value=value)
             if builtin is not None:
                 return builtin
 

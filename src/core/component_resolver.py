@@ -695,29 +695,30 @@ def resolve_mpn(
 
     # Try a category match, preferring the requested package and value.
     for category in _CATEGORY_KEYWORDS.get(component_type, ()):
-        # A curated part that matches the requested value and package exactly is
-        # the best answer available: its symbol and pinout have been checked
-        # against the rest of the pipeline. Searching the catalogue first would
-        # return whichever real part ranks highest, which for "10uF 0805" was a
-        # 0402 capacitor.
-        curated = None
+        # A component template that matches the requested value and package
+        # exactly is the best answer available: its symbol and footprint have
+        # been checked against the rest of the pipeline. Searching the catalogue
+        # first would return whichever real part ranks highest, which for
+        # "10uF 0805" was a 0402 capacitor.
+        template = None
         if value:
             try:
-                curated = database.find_builtin(
+                template = database.find_template(
                     category, value=value, package=package or None
                 )
-                if curated is None:
-                    curated = database.find_builtin(category, value=value)
+                if template is None:
+                    template = database.find_template(category, value=value)
             except Exception:  # pragma: no cover - defensive against DB quirks
-                curated = None
-        if curated is not None:
+                template = None
+        if template is not None:
             return MPNResolution(
                 requested_mpn=requested_mpn,
-                resolved=curated,
+                resolved=template,
                 substituted=True,
                 note=(
-                    f"MPN '{requested_mpn}' not in catalog; substituted "
-                    f"{curated.mpn} (curated part matching value and package)"
+                    f"MPN '{requested_mpn}' not in catalog; using the component "
+                    f"template for {template.value} {template.package} "
+                    f"(value + package match)"
                 ),
             )
 

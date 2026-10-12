@@ -36,7 +36,7 @@ This project builds an AI-powered electronics design platform that transforms na
 **Current Capabilities (Implemented):**
 1. ✅ Circuit Intermediate Representation (Circuit IR) - canonical data model
 2. ✅ Deterministic Electrical Rule Checking (ERC) - 6 validation rules
-3. ✅ Component Database - offline jlcparts catalog (MIT) when present, built-in catalog otherwise
+3. ✅ Component Database - offline JLCPCB/LCSC catalog (179,894 parts) plus component templates for when it is not installed
 4. ✅ KiCad Schematic Generation - S-expression compiler with real electrical
    connectivity, verified by exporting a netlist with `kicad-cli`
 5. ✅ ngspice SPICE Simulation - DC op, transient, DC sweep
@@ -68,9 +68,11 @@ This project builds an AI-powered electronics design platform that transforms na
   Verified working: 30 tracks routed, **0 unconnected pads**, on a generated
   board. Without these, generation still succeeds and routing reports a clear
   error instead of failing silently.
-- ⚠️ **The full component catalog is a separate 145 MB download.** Without it
-  the platform uses a built-in catalog of 38 common parts, so part selection and
-  substitution are limited to those. Install it with
+- ⚠️ **The full component catalog is a separate 145 MB download.** Without it the
+  platform has **component templates** — symbol, footprint and package for 36
+  common values, and no part numbers, prices or stock. Design generation still
+  works and produces a correct schematic and board; the purchase list then
+  reports honestly that nothing can be ordered. Install the catalog with
   `ai-electronics-design catalog-setup` (see
   [Component Catalog](#component-catalog-180000-real-parts)).
 - ⚠️ **Parametric search covers 55,535 of the 179,894 parts** — those whose
@@ -80,18 +82,15 @@ This project builds an AI-powered electronics design platform that transforms na
 - ⚠️ **The catalog's JLCPCB "Basic" library flag is effectively empty** (1 part
   of 179,894). Ranking uses the Preferred flag (972 parts) instead. See
   [Where it comes from](#where-it-comes-from).
-- ⚠️ **Most of the built-in fallback catalog's part numbers are placeholders.**
-  Checked against the downloaded catalog, of its 38 parts **7 exist in the
-  package listed** (`AMS1117-3.3`, `1N4148W`, `SS14`, `2N7002`, `SI2302`,
-  `TL431`, `LM317L`), **3 exist only in another package** (`LM7805`,
-  `LM2596S-5.0`, `LM358` — the footprint will not fit), and **28 do not exist at
-  all**. Numbers like `CC0805KRX7R9BB106` and `RC0805FR-07330RL` are
-  Yageo-shaped placeholders. The list is kept because it gives the pipeline
-  symbols and pinouts it is verified against, not because it is orderable: the
-  purchase list resolves every value and package to a real catalog part and says
-  on the line when the part number changed. `VERIFIED_BUILTIN_MPNS` in
-  `src/components/database.py` records the verified set, and a test fails if it
-  drifts.
+- ⚠️ **The component templates carry no part numbers.** This is deliberate, and
+  it replaced an earlier design that did carry them: of the 38 part numbers the
+  built-in list used to hold, **7 existed in the catalogue, 3 existed only in a
+  different package, and 28 existed nowhere** — numbers like
+  `CC0805KRX7R9BB106` and `RC0805FR-07330RL` that look exactly like orderable
+  parts. Their prices were invented too: an AMS1117 was quoted at $0.15 against a
+  catalogue price of $0.0187. The templates now carry only what the catalogue
+  does not provide (symbol, footprint, package, value), and the catalogue is the
+  single source of part numbers, prices and stock. A test enforces this.
 - ⚠️ Three implemented subsystems are **not wired into the pipeline**: the
   permission system, the process sandbox, and the free-form MCP agent. They have
   tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
@@ -948,9 +947,11 @@ half-written catalog silently degrading part selection.
 
 ### It is optional
 
-Design generation works without it, using a built-in catalog of 38 common parts.
-You lose real stock, real pricing and reliable substitution — the design may
-still be valid, but its BOM is not guaranteed to be orderable.
+Design generation works without it, using **36 component templates**. You get a
+correct schematic and board, with the right symbols and footprints. You do not get
+part numbers, prices or stock, because the templates carry none: the purchase list
+marks every line as not orderable and says so, rather than filling the gap with a
+number that looks real and is not.
 
 ---
 

@@ -933,7 +933,7 @@ class CircuitSpecificationGenerator:
                 parts = []
             for part in parts:
                 if not part.lcsc_part:
-                    # No LCSC number means a built-in placeholder, not something
+                    # No LCSC number means a component template, not something
                     # that can be ordered. Offering it here is how invented part
                     # numbers spread into designs.
                     continue
@@ -1028,7 +1028,7 @@ class CircuitSpecificationGenerator:
                 self._make_component(
                     role="regulator",
                     mpn=ldo["mpn"],
-                    manufacturer=ldo.get("manufacturer", "AMS"),
+                    manufacturer=ldo.get("manufacturer", ""),
                     value=f"{v_out}V",
                     package=ldo.get("package", "SOT-223"),
                     reasoning=f"LDO regulator {v_in}V to {v_out}V at {i_out}A",
@@ -1036,7 +1036,7 @@ class CircuitSpecificationGenerator:
                 self._make_component(
                     role="input_capacitor",
                     mpn=caps[0]["mpn"],
-                    manufacturer=caps[0].get("manufacturer", "Yageo"),
+                    manufacturer=caps[0].get("manufacturer", ""),
                     value=caps[0].get("value", "10uF"),
                     package=caps[0].get("package", "0805"),
                     reasoning="Input decoupling capacitor",
@@ -1044,7 +1044,7 @@ class CircuitSpecificationGenerator:
                 self._make_component(
                     role="output_capacitor",
                     mpn=caps[1]["mpn"],
-                    manufacturer=caps[1].get("manufacturer", "Yageo"),
+                    manufacturer=caps[1].get("manufacturer", ""),
                     value=caps[1].get("value", "22uF"),
                     package=caps[1].get("package", "0805"),
                     reasoning="Output stability capacitor",
@@ -1052,7 +1052,7 @@ class CircuitSpecificationGenerator:
                 self._make_component(
                     role="led_indicator",
                     mpn=led["mpn"],
-                    manufacturer=led.get("manufacturer", "Lite-On"),
+                    manufacturer=led.get("manufacturer", ""),
                     value=led.get("value", "Green"),
                     package=led.get("package", "0805"),
                     reasoning="Power-on indicator",
@@ -1060,7 +1060,7 @@ class CircuitSpecificationGenerator:
                 self._make_component(
                     role="current_limit_resistor",
                     mpn=res["mpn"],
-                    manufacturer=res.get("manufacturer", "Yageo"),
+                    manufacturer=res.get("manufacturer", ""),
                     value=res.get("value", "330"),
                     package=res.get("package", "0805"),
                     reasoning="LED current limiting resistor",
@@ -1087,8 +1087,7 @@ class CircuitSpecificationGenerator:
     def _select_ldo(self, v_out: float, i_out: float) -> dict:
         # Simplified selection - in reality would query database
         return {
-            "mpn": "AMS1117-3.3",
-            "manufacturer": "AMS",
+            "mpn": "",
             "package": "SOT-223",
             "v_out": v_out,
             "i_max": 1.0
@@ -1096,15 +1095,15 @@ class CircuitSpecificationGenerator:
 
     def _select_caps(self) -> List[dict]:
         return [
-            {"mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805"},
-            {"mpn": "CC0805KRX5R7BB226", "manufacturer": "Yageo", "value": "22uF", "package": "0805"}
+            {"mpn": "", "value": "10uF", "package": "0805"},
+            {"mpn": "", "value": "22uF", "package": "0805"}
         ]
 
     def _select_led(self) -> dict:
-        return {"mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805"}
+        return {"mpn": "", "value": "Green", "package": "0805"}
 
     def _select_resistor(self) -> dict:
-        return {"mpn": "RC0805FR-07330RL", "manufacturer": "Yageo", "value": "330", "package": "0805"}
+        return {"mpn": "", "value": "330", "package": "0805"}
 
     def _spec_buck(self, req):
         return {
@@ -1112,40 +1111,35 @@ class CircuitSpecificationGenerator:
             "components": [
                 {
                     "role": "controller",
-                    "mpn": "LM2596S-5.0",
-                    "manufacturer": "TI",
+                    "mpn": "",
                     "value": "5V",
                     "package": "TO-220-5",
                     "reasoning": "Buck converter controller",
                 },
                 {
                     "role": "inductor",
-                    "mpn": "SRN6045-470M",
-                    "manufacturer": "Bourns",
+                    "mpn": "",
                     "value": "47uH",
                     "package": "1210",
                     "reasoning": "Buck inductor",
                 },
                 {
                     "role": "input_capacitor",
-                    "mpn": "CC0805KRX7R9BB106",
-                    "manufacturer": "Yageo",
+                    "mpn": "",
                     "value": "10uF",
                     "package": "0805",
                     "reasoning": "Input decoupling",
                 },
                 {
                     "role": "output_capacitor",
-                    "mpn": "CC0805KRX5R7BB226",
-                    "manufacturer": "Yageo",
+                    "mpn": "",
                     "value": "22uF",
                     "package": "0805",
                     "reasoning": "Output filtering",
                 },
                 {
                     "role": "freewheel_diode",
-                    "mpn": "SS14",
-                    "manufacturer": "Vishay",
+                    "mpn": "",
                     "value": "1A/40V",
                     "package": "SMA",
                     "reasoning": "Freewheeling diode",
@@ -1174,40 +1168,35 @@ class CircuitSpecificationGenerator:
             "components": [
                 {
                     "role": "controller",
-                    "mpn": "MT3608",
-                    "manufacturer": "Aerosemi",
+                    "mpn": "",
                     "value": "Adjustable",
                     "package": "SOT-23-6",
                     "reasoning": "Boost converter IC",
                 },
                 {
                     "role": "inductor",
-                    "mpn": "SRN4018-100M",
-                    "manufacturer": "Bourns",
+                    "mpn": "",
                     "value": "10uH",
                     "package": "0805",
                     "reasoning": "Boost inductor",
                 },
                 {
                     "role": "input_capacitor",
-                    "mpn": "CC0805KRX7R9BB106",
-                    "manufacturer": "Yageo",
+                    "mpn": "",
                     "value": "10uF",
                     "package": "0805",
                     "reasoning": "Input decoupling",
                 },
                 {
                     "role": "output_capacitor",
-                    "mpn": "CC0805KRX5R7BB226",
-                    "manufacturer": "Yageo",
+                    "mpn": "",
                     "value": "22uF",
                     "package": "0805",
                     "reasoning": "Output filtering",
                 },
                 {
                     "role": "freewheel_diode",
-                    "mpn": "SS14",
-                    "manufacturer": "Vishay",
+                    "mpn": "",
                     "value": "1A/40V",
                     "package": "SMA",
                     "reasoning": "Boost rectifier",
@@ -1233,16 +1222,14 @@ class CircuitSpecificationGenerator:
             "components": [
                 {
                     "role": "led",
-                    "mpn": "LTST-C190KGKT",
-                    "manufacturer": "Lite-On",
+                    "mpn": "",
                     "value": "Green",
                     "package": "0805",
                     "reasoning": "Green indicator LED",
                 },
                 {
                     "role": "current_limit_resistor",
-                    "mpn": "RC0805FR-07330RL",
-                    "manufacturer": "Yageo",
+                    "mpn": "",
                     "value": "330",
                     "package": "0805",
                     "reasoning": "Current limiting resistor",

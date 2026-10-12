@@ -101,8 +101,8 @@ def _run_catalog_status() -> int:
         print("  status : full offline catalog in use")
     else:
         print(f"  expected path: {default_catalog_path()}")
-        print("  status : built-in fallback catalog only "
-              "(common parts, no stock or price data)")
+        print("  status : component templates only "
+              "(symbols and footprints; no part numbers, prices or stock)")
         print()
         print("Download the full catalog with: ai-electronics-design catalog-setup")
     return 0
@@ -159,7 +159,8 @@ def _run_parts_search(
     if not db.using_jlcparts:
         print(
             "The full component catalog is not installed, so this search would\n"
-            "only cover the built-in list of common parts.\n"
+            "only cover the component templates: values and footprints, with no\n"
+            "part numbers, prices or stock.\n"
             "Download it with: ai-electronics-design catalog-setup",
             file=sys.stderr,
         )
@@ -206,8 +207,8 @@ def _run_parts_search(
     if db.using_jlcparts:
         print("Prices are JLCPCB quantity-tier prices and exclude assembly fees.")
     else:
-        print("These are built-in placeholder parts: stock and prices are")
-        print("indicative only, not distributor data.")
+        print("These are component templates: there are no part numbers, prices")
+        print("or stock without the catalog.")
     print("Verify stock and specifications before ordering.")
     return 0
 
@@ -514,7 +515,7 @@ async def _run(args: argparse.Namespace) -> int:
         for line in purchase.lines:
             refs = ", ".join(line.designators)
             lcsc = line.lcsc_part or "—"
-            part = (line.order_mpn or line.mpn)[:24]
+            part = (line.order_mpn or line.mpn or "—")[:24]
             if line.price_source == "unknown":
                 unit = line_total = "—"
             else:

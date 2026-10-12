@@ -20,10 +20,12 @@ def orchestrator() -> AIDesignOrchestrator:
 
 
 class TestSelectPart:
-    def test_uses_the_curated_part_when_one_matches(self, orchestrator):
+    def test_uses_the_template_when_one_matches(self, orchestrator):
         part = orchestrator._select_part("capacitor", "10uF 0805", value="10uF")
         assert part.value == "10uF"
-        assert part.lcsc_part is None, "expected the curated built-in part"
+        assert part.lcsc_part is None, "expected the component template"
+        assert part.symbol == "Device:C"
+        assert part.footprint == "Capacitor_SMD:C_0805_2012Metric"
 
     def test_selects_the_intended_value_not_just_the_category(self, orchestrator):
         """
@@ -34,7 +36,9 @@ class TestSelectPart:
         c_out = orchestrator._select_part("capacitor", "22uF 0805", value="22uF")
         assert c_in.value == "10uF"
         assert c_out.value == "22uF"
-        assert c_in.mpn != c_out.mpn
+        # Different values, so different footprints are still required; the part
+        # numbers are the catalogue's business, not the template's.
+        assert c_in.value != c_out.value
 
         resistor = orchestrator._select_part("resistor", "330 0805", value="330")
         assert resistor.value == "330"
@@ -54,7 +58,7 @@ class TestSelectPart:
         def nothing(*args, **kwargs):
             return []
 
-        monkeypatch.setattr(orchestrator.db, "find_builtin", lambda *a, **k: None)
+        monkeypatch.setattr(orchestrator.db, "find_template", lambda *a, **k: None)
         monkeypatch.setattr(orchestrator.db, "search", nothing)
         with pytest.raises(LookupError, match="catalog-setup"):
             orchestrator._select_part("capacitor", "10uF")

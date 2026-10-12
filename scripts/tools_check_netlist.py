@@ -19,13 +19,13 @@ SPEC = [
     ("U1", "AMS1117-3.3", "Regulator_Linear:AMS1117-3.3",
      "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
      [("1", "GND", PinType.POWER_IN), ("2", "VO", PinType.POWER_OUT), ("3", "VI", PinType.POWER_IN)]),
-    ("C1", "CC0805KRX7R9BB106", "Device:C", "Capacitor_SMD:C_0805_2012Metric",
+    ("C1", "10uF", "Device:C", "Capacitor_SMD:C_0805_2012Metric",
      [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
-    ("C2", "CC0805KRX5R7BB226", "Device:C", "Capacitor_SMD:C_0805_2012Metric",
+    ("C2", "22uF", "Device:C", "Capacitor_SMD:C_0805_2012Metric",
      [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
-    ("D1", "LTST-C190KGKT", "Device:LED", "LED_SMD:LED_0805_2012Metric",
+    ("D1", "Green", "Device:LED", "LED_SMD:LED_0805_2012Metric",
      [("1", "K", PinType.PASSIVE), ("2", "A", PinType.PASSIVE)]),
-    ("R1", "RC0805FR-07330RL", "Device:R", "Resistor_SMD:R_0805_2012Metric",
+    ("R1", "330", "Device:R", "Resistor_SMD:R_0805_2012Metric",
      [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
 ]
 

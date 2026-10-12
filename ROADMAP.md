@@ -393,7 +393,8 @@ Explain the advantages and disadvantages.
 # 7. COMPONENT DATABASE
 
 - [x] **IMPLEMENTED** - JLCPCB/LCSC offline catalog (CDFER republish of
-  yaqwsx/jlcparts), 179,894 in-stock parts, with a built-in fallback catalog.
+  yaqwsx/jlcparts), 179,894 in-stock parts, with component templates for the
+  case where it is not installed.
 - [x] **IMPLEMENTED** - Numeric parametric search over that catalog
   (`src/components/parametric.py`). Values are parsed from the catalogue's JSON
   attributes into numbers and matched as numbers, so `10k 0603` cannot return
@@ -437,13 +438,26 @@ Explain the advantages and disadvantages.
   is disclosed, with a pinout warning for anything that is not a two-terminal
   passive; insufficient stock is a warning; and without the full catalog the
   prices are labelled as placeholders so an estimate is never read as a quote.
-- [x] **VERIFIED** - Audited every part number in the built-in catalog against
-  the downloaded catalogue: **7 of 38 exist in the package listed**
-  (``AMS1117-3.3``, ``1N4148W``, ``SS14``, ``2N7002``, ``SI2302``, ``TL431``,
-  ``LM317L``), **3 exist only in another package** (``LM7805``,
-  ``LM2596S-5.0``, ``LM358``), and **28 do not exist at all**. The verified sets
-  are declared in ``src/components/database.py`` and a test fails if the
-  catalogue drifts or the documentation counts become wrong.
+- [x] **VERIFIED** - Audited every part number the built-in list used to hold
+  against the downloaded catalogue: **7 of 38 existed in the package listed**,
+  **3 existed only in another package**, and **28 existed nowhere**.
+- [x] **IMPLEMENTED** - The duplicated parts data is **gone**. The list is now a
+  set of **36 component templates** carrying a category, value, package, symbol
+  and footprint, and no part number, manufacturer, price or stock
+  (``ComponentSpec`` defaults those to empty). There is one source of parts data
+  — the catalogue — so a design cannot name a part number the catalogue does not
+  know. Measured before deciding: deleting the list outright broke 30 tests and
+  left the pipeline with no parts at all without a catalogue download; keeping
+  templates and removing the parts data left the offline path intact and removed
+  every fabricated number.
+- [x] **FIXED** - A test that every template's footprint exists in KiCad found
+  **4 of 38 pointing at footprints KiCad does not have**: ``RP2040`` named a
+  library that does not exist (``Package_QFN``; the real one is
+  ``Package_DFN_QFN``), the DPDT switch named a footprint that does not exist,
+  and KiCad ships **no RCA jack and no 9 V battery-clip footprint at all**, so
+  those two templates were removed rather than pointed at a name that cannot
+  resolve. A template with an unresolvable footprint is worse than no template:
+  it produces a board with no pads.
 - [x] **IMPLEMENTED** - The LLM prompt no longer teaches invented part numbers.
   Its few-shot examples used to name ``CC0805KRX7R9BB106`` and ``LTST-C190KGKT``
   while the instructions said not to invent part numbers — the model copied the
