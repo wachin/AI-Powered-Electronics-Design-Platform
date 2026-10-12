@@ -1,5 +1,32 @@
 # AI-Powered Electronics Design Platform
 
+<!--
+  Badges are static on purpose. A CI status badge is only added once this
+  repository has actually run the "CI" workflow on GitHub, so that it reports a
+  real result instead of a plausible-looking placeholder.
+  Every claim below is verifiable: LICENSE, pyproject.toml, and the test suite.
+-->
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-199%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
+[![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
+[![LLM providers](https://img.shields.io/badge/LLM-Ollama%20%7C%20OpenAI--compatible%20%7C%20Anthropic-6f42c1.svg)](docs/llm-pipeline.md)
+
+**Turn a sentence into a validated, manufacturable KiCad project.**
+
+Describe the circuit you need in plain language. The platform asks an AI for a
+*structured specification*, checks that specification against real parts, real
+pins and electrical rules, and then compiles it — deterministically — into a
+KiCad schematic and PCB, a bill of materials you can order, and Gerber files you
+can send to a board house.
+
+**What works today:** the full path from prompt to an ERC-clean KiCad project
+with a correct netlist and Gerbers. **Not yet:** PCB auto-routing (blocked by a
+Java version mismatch) and datasheet understanding. See
+[Known Limitations](#known-limitations).
+
 ---
 
 ## Project Purpose
@@ -9,40 +36,67 @@ This project builds an AI-powered electronics design platform that transforms na
 **Current Capabilities (Implemented):**
 1. ✅ Circuit Intermediate Representation (Circuit IR) - canonical data model
 2. ✅ Deterministic Electrical Rule Checking (ERC) - 6 validation rules
-3. ✅ JLCPCB/LCSC Component Database - offline jlcparts catalog when present, built-in catalog otherwise
+3. ✅ Component Database - offline jlcparts catalog (MIT) when present, built-in catalog otherwise
 4. ✅ KiCad Schematic Generation - S-expression compiler with real electrical
    connectivity, verified by exporting a netlist with `kicad-cli`
 5. ✅ ngspice SPICE Simulation - DC op, transient, DC sweep
-6. ✅ FreeRouting PCB Auto-routing - DSN export → routing → SES import
+6. ⛔ PCB Auto-routing - wrapper written, **blocked** (Java version mismatch); see Known Limitations
 7. ✅ Bill of Materials (BOM) Generation - real catalog MPNs, descriptions and pricing
-8. ✅ Gerber/Drill Manufacturing Export - via kicad-cli (for valid boards)
+8. ✅ Gerber/Drill Manufacturing Export - verified on generated boards via `kicad-cli`
 9. ✅ CLI Interface - full pipeline from prompt to KiCad project
 10. ✅ Natural Language Understanding (LLM integration) - Ollama / OpenAI-compatible / Anthropic,
     with schema-constrained output, catalog-grounded part selection, pin and ERC
     validation, and an automatic repair loop (see `docs/llm-pipeline.md`)
 
-**Known Limitations:**
-- ⚠️ **Auto-routing cannot run with KiCad 7+.** FreeRouting needs Specctra DSN
-  input, and `kicad-cli pcb export dsn` was removed in KiCad 7 (verified absent
-  in KiCad 9.0.2). Generated boards are unrouted; the router reports a clear
-  error rather than failing silently. Workarounds: KiCad 6 alongside, an external
-  DSN converter, or `pcbnew` scripting.
-- ⚠️ The built-in component catalog only covers common parts; the 600k-part
-  jlcparts catalog is used automatically when its offline database is present.
+### Known Limitations
+- ⚠️ **PCB auto-routing does not run on a current KiCad install.** Three
+  separate blockers, all verified:
+  1. `kicad-cli pcb export dsn` was **removed in KiCad 7** and
+     `kicad-cli pcb import ses` never existed. (The working path is
+     `pcbnew.ExportSpecctraDSN` / `pcbnew.ImportSpecctraSES`, which are available.)
+  2. Every bundled FreeRouting jar is compiled for **Java 25**; this machine runs
+     Java 21, so the jars refuse to start.
+  3. The wrapper still calls the removed `kicad-cli` subcommands instead of
+     `pcbnew`.
+  Generated boards are therefore **unrouted**: route them in KiCad's editor, or
+  fix the three items above. The router reports a clear error rather than
+  failing silently.
+- ⚠️ The built-in component catalog covers only common parts. The full
+  jlcparts catalog is used automatically when its offline database is present,
+  but it is **not** bundled — without it, part substitution is limited.
+- ⚠️ Several implemented subsystems are **not wired into the pipeline**:
+  smart PCB placement, the permission system, the sandbox, and the MCP agent.
+  See [`ROADMAP.md` §22](ROADMAP.md) for the verified list.
 - ⚠️ The requirement parser fills defaults for unspecified values instead of
   asking the user.
 - ⚠️ A working KiCad installation is required: symbol and footprint libraries
   are read at runtime (see `CREDITS.md` for licensing).
 
-**Planned / In Progress:**
-- 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
-- 🔄 DSN export path so FreeRouting can run on modern KiCad
-- 🔄 Web Frontend (React/TypeScript + Yjs collaboration)
-- 🔄 Datasheet Extraction (RAG pipeline)
-- 🔄 Smart PCB Placement (thermal, signal integrity)
-- 🔄 AI Agent Tool Architecture (MCP)
+### Planned / In Progress
 
-**It is built exclusively with open-source technologies.**
+- 🔄 DSN/SES path via `pcbnew`, plus a Java 25 runtime, to make auto-routing work
+- 🔄 Wiring the orphaned modules into the pipeline (placement first)
+- 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
+- 🔄 Datasheet understanding / RAG (section 8 of the ROADMAP)
+- 🔄 Enclosure generation and 3D component models
+
+### Status of the larger pieces
+
+| Piece | State |
+|---|---|
+| CLI + Python API | ✅ Works |
+| Natural language → specification | ✅ Works (local or cloud LLM) |
+| Specification → validated Circuit IR | ✅ Works |
+| Schematic + PCB + Gerbers | ✅ Works and is KiCad-verified |
+| SPICE simulation | ✅ Works |
+| Web frontend + collaboration | ✅ Implemented (builds, WebSocket server present) |
+| PCB autorouting | ⛔ Blocked (see above) |
+| Smart placement / permissions / sandbox / MCP agent | ⚠️ Implemented but not wired in |
+| Datasheet understanding | ❌ Not started |
+
+**Built with open-source technologies.** (KiCad, ngspice and FreeRouting are used
+as external programs; AI features can talk to hosted providers if you configure
+one, or run fully locally with Ollama.)
 
 ---
 
@@ -60,9 +114,9 @@ your sentence to a board you can order, assemble and power on.
 │   indicator."                                                              │
 │                                                                            │
 │ This is the only thing you have to write.                                  │
-└───────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
+└──────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
 ┌── 2. THE PLATFORM APPENDS AN OUTPUT CONTRACT ──────────────────────────────┐
 │                                                                            │
 │   Your request is not sent as free text. Two things are attached to it:    │
@@ -83,9 +137,9 @@ your sentence to a board you can order, assemble and power on.
 │   Grounding: a short list of REAL catalog part numbers is included, so     │
 │   the model has something concrete to choose from instead of inventing     │
 │   parts.                                                                   │
-└───────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
+└──────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
 ┌── 3. AN AI PRODUCES THE SPECIFICATION ─────────────────────────────────────┐
 │                                                                            │
 │   Local (Ollama) or cloud (OpenAI-compatible / Anthropic): the same        │
@@ -98,9 +152,9 @@ your sentence to a board you can order, assemble and power on.
 │   {"topology": "LDO Linear Regulator",                                     │
 │    "components": [{"role": "regulator", "mpn": "AMS1117-3.3"}],            │
 │    "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}]}        │
-└───────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
+└──────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
 ┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ────────────────┐
 │                                                                            │
 │   The AI never writes KiCad files. Code does that, and code decides        │
@@ -122,9 +176,9 @@ your sentence to a board you can order, assemble and power on.
 │                                          problems, ask for a corrected     │
 │                                          spec, keep the best attempt       │
 │                                          (up to N tries)                   │
-└───────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
+└──────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
 ┌── 5. WHAT YOU RECEIVE ─────────────────────────────────────────────────────┐
 │                                                                            │
 │   design.kicad_sch  schematic with REAL electrical connectivity            │
@@ -137,9 +191,9 @@ your sentence to a board you can order, assemble and power on.
 │                                                                            │
 │   KiCad itself checks this output in the test suite: netlist extraction,   │
 │   DRC and Gerber/drill export all run against generated designs.           │
-└───────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
+└──────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
 ┌── 6. YOUR PART ────────────────────────────────────────────────────────────┐
 │                                                                            │
 │   Order parts from the BOM  ->  have the board made from the Gerbers       │
@@ -148,124 +202,6 @@ your sentence to a board you can order, assemble and power on.
 │   The design is ERC-clean and uses real parts, so it is something you      │
 │   can actually build -- not a plausible-looking sketch.                    │
 └────────────────────────────────────────────────────────────────────────────┘
-```json fences are still parsed, so a   │
-│   stray wrapper does not break the run.                                    │
-│                                                                            │
-│ The answer is a specification, NOT a schematic:                            │
-│                                                                            │
-│   {"topology": "LDO Linear Regulator",                                     │
-│    "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],       │
-│    "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]}   │
-└────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ────────────────────┐
-│                                                                                │
-│   The AI never writes KiCad files. Code does that, and code decides            │
-│   whether the answer is physically real:                                       │
-│                                                                                │
-│   ROLE -> TYPE      MPN -> REAL PART    PIN RESOLUTION      BUILD CIRCUIT IR   │
-│   input_capacitor   exact catalog hit   checked against     components, nets,  │
-│    -> Capacitor     or a substitute     the installed       power domains,     │
-│   led_resistor      with the right      KiCad symbol's      designators (U1,   │
-│    -> Resistor      value and package   real pin names      C1, R1, D1 ...)    │
-│         │                  │                  │                   │            │
-│         └──────────────────┴────────┬─────────┴───────────────────┘            │
-│                                     ▼                                          │
-│   VALIDATE:  schema ok | parts exist | pins exist | 6 ERC rules pass           │
-│                                     │                                          │
-│                          errors? ───┴─── yes ──> REPAIR: hand the model the    │
-│                             │                     exact problems, ask for a    │
-│                             │                     corrected spec, keep the     │
-│                             │                     best attempt (up to N tries) │
-│                             ▼  no errors                                       │
-└────────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌── 5. WHAT YOU RECEIVE ─────────────────────────────────────────────────────┐
-│                                                                            │
-│   design.kicad_sch   schematic with REAL electrical connectivity           │
-│                      (verified with: kicad-cli sch export netlist)         │
-│   design.kicad_pcb   board with real pads, each pad on its correct net     │
-│   design.kicad_pro   KiCad project                                         │
-│   design.gltf        3D view                                               │
-│   BOM                REAL, purchasable part numbers, descriptions, prices  │
-│   gerbers/ + .drl    fabrication files for a board house                   │
-│                                                                            │
-│   KiCad itself checks this output in the test suite: netlist extraction,   │
-│   DRC, and Gerber/drill export all run against generated designs.          │
-└────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌── 6. YOUR PART ─────────────────────────────────────────────────────────────┐
-│                                                                             │
-│   Order the parts from the BOM  ->  have the board made from the Gerbers    │
-│   (or etch/mill it yourself)    ->  solder the components  ->  power it on. │
-│                                                                             │
-│   The design is ERC-clean and uses real parts, so it is something you       │
-│   can actually build -- not a plausible-looking sketch.                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-```json wrapper does not break the run.      │
-│                                                                             │
-│    Output is a specification, NOT a schematic:                              │
-│      {"topology": "LDO Linear Regulator",                                   │
-│       "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],     │
-│       "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]} │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 4. DETERMINISTIC PIPELINE — the part that decides whether this is buildable │
-│                                                                             │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
-│  │ ROLE → TYPE  │   │ MPN → REAL   │   │ PIN RESOLVE  │   │ BUILD CIRCUIT│  │
-│  │ "input_cap"  │   │ PART         │   │ against the  │   │ IR:  comps,  │  │
-│  │  → Capacitor │   │ exact catalog│   │ installed    │   │ nets, power  │  │
-│  │ "led_resist" │   │ hit, else a  │   │ KiCad symbol │   │ domains, with│  │
-│  │  → Resistor  │   │ substitute   │   │ pin names    │   │ designators  │  │
-│  └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘  │
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ VALIDATE:  schema ✓   parts exist ✓   pins exist ✓   ERC rules ✓      │  │
-│  └───────────────────────────────┬───────────────────────────────────────┘  │
-│                                  │                                          │
-│                        errors? ──┴── yes ──▶ ┌──────────────────────────┐   │
-│                                              │ REPAIR: send the model   │   │
-│                                              │ the exact problems and   │   │
-│                                              │ ask for a corrected spec │   │
-│                                              └────────────┬─────────────┘   │
-│                                                           │ (up to N tries) │
-│                              no errors ◀──────────────────┘                 │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 5. WHAT YOU RECEIVE                                                         │
-│                                                                             │
-│   design.kicad_sch ──► schematic with REAL electrical connectivity          │
-│                        (checks with: kicad-cli sch export netlist)          │
-│   design.kicad_pcb ──► board with real pads, each pad on its correct net    │
-│   design.kicad_pro ──► KiCad project                                        │
-│   design.gltf      ──► 3D view                                              │
-│   design-BOM       ──► bill of materials with REAL, purchasable MPNs,       │
-│                        descriptions and indicative prices                   │
-│   gerbers/ + .drl  ──► fabrication files you can send to a board house      │
-│                                                                             │
-│   Verified by KiCad itself: netlist extraction, DRC, and Gerber/drill       │
-│   export all run against generated output in the test suite.                │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 6. YOUR PART                                                                │
-│                                                                             │
-│   Order the parts from the BOM  →  have the board made from the Gerbers     │
-│   (or etch/mill it yourself)    →  solder the components                    │
-│   →  power it on.                                                           │
-│                                                                             │
-│   The design is ERC-clean and uses real parts, so it is a design you can    │
-│   actually build — not a plausible-looking sketch.                          │
-└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Why the contract is appended (and why it matters)
@@ -327,30 +263,49 @@ Natural Language Prompt
 
 ## What We Build Ourselves vs. Use
 
-### ✅ We BUILD (Implemented):
+### ✅ We build (implemented)
+
+Core data model and engineering checks:
+
 - Circuit Intermediate Representation (`src/core/circuit_ir.py`)
-- ERC Engine with 6 deterministic rules (`src/core/erc.py`)
-- KiCad S-expression Generator (`src/generators/kicad_generator.py`)
-- SPICE Netlist Compiler (`src/simulation/ngspice.py`)
-- FreeRouting Integration (`src/routing/freerouting.py`)
-- JLCParts Database Wrapper (`src/components/jlcparts.py`)
-- Unified Component Database (`src/components/database.py`)
-- AI Design Orchestrator Pipeline (`src/agents/orchestrator.py`)
-- CLI Entry Point (`main.py`)
+- Specification → Circuit IR builder, with real MPNs and pins (`src/core/circuit_builder.py`)
+- Role/pin/MPN resolution against real KiCad symbols (`src/core/component_resolver.py`)
+- ERC engine, 6 deterministic rules (`src/core/erc.py`)
 
-### 🔧 We USE via subprocess (MIT/GPL-compatible):
-- **KiCad 8+** (`kicad-cli`) - EDA engine, ERC, DRC, Gerber, DSN export, SES import
-- **ngspice** - SPICE simulation (batch mode)
-- **FreeRouting** - PCB autorouter (Java JAR)
-- **yaqwsx/jlcparts** - Offline component catalog (SQLite, CC0)
+AI layer:
 
-### 📦 External References (in `external/` submodules):
-- `kicad-tools` - KiCad automation utilities
-- `kicad-mcp-server` - MCP server for KiCad
-- `freerouting` - Autorouter source
-- `ngspice` - SPICE simulator source
-- `circuit-json-to-kicad` - Circuit JSON converter
-- `pcbparts-mcp` - Component database tools
+- LLM providers: Ollama, OpenAI-compatible, Anthropic (`src/llm/providers.py`)
+- Specification generation, validation and repair loop (`src/llm/integration.py`, `src/llm/validation.py`)
+
+Output and verification:
+
+- KiCad schematic + PCB S-expression compiler (`src/generators/kicad_generator.py`)
+- Readers for installed KiCad symbol/footprint libraries (`kicad_symbols.py`, `kicad_footprints.py`)
+- SPICE netlist compiler (`src/simulation/ngspice.py`)
+- 3D glTF export (`src/generators/gltf_exporter.py`)
+- Component database (`src/components/database.py`, `jlcparts.py`)
+- Orchestrator, FastAPI backend, CLI (`src/agents/orchestrator.py`, `src/api/main.py`, `src/cli.py`)
+
+### 🔧 Used as external programs (not linked)
+
+- **KiCad** (`kicad-cli`) — netlist export, ERC, DRC, Gerber/drill export.
+  Note: **no DSN export or SES import** — those `kicad-cli` subcommands do not
+  exist in KiCad 7+ (the `pcbnew` Python API does provide them).
+- **KiCad symbol + footprint libraries** — read at runtime for pin geometry and
+  pad definitions. CC-BY-SA-4.0 with a design exception; see `CREDITS.md`.
+- **ngspice** — SPICE simulation (batch mode).
+- **FreeRouting** — PCB autorouter (Java JAR). Not currently runnable; see Known Limitations.
+- **yaqwsx/jlcparts** — offline component catalog (MIT, SQLite).
+
+### 📦 External references (in `external/`, reference only)
+
+32 Git submodules are available for study — none are imported, linked, or
+required. Highlights: `kicad`, `kicad-tools`, `kicad-mcp-server`, `circuit-json`,
+`tscircuit`, `skidl`, `atopile`, `circuit-synth`, `freerouting`, `ngspice`,
+`pyspice`, `yjs`, `automerge`, `jlcparts`, `librepcb`, `ecad-viewer`.
+
+See `research/repository_catalog.md` for the full list with licenses, and
+`AGENTS.md` for the reference-only policy.
 
 ---
 
@@ -360,24 +315,17 @@ Natural Language Prompt
 |-------|------------|---------|--------|
 | **Circuit IR** | Custom (Python) | GPL-3.0 | ✅ Implemented |
 | **ERC** | Custom (Python) | GPL-3.0 | ✅ Implemented |
-| **Component DB** | JLCParts (yaqwsx/jlcparts) | CC0 | ✅ Implemented |
-| **EDA Engine** | KiCad 8 (`kicad-cli`) | GPL-3.0 | ✅ Integrated |
+| **Component DB** | JLCParts (yaqwsx/jlcparts) | MIT | ✅ Implemented |
+| **EDA Engine** | KiCad 8.x / 9.x (`kicad-cli`) | GPL-3.0 | ✅ Integrated |
 | **Schematic/PCB Gen** | Custom S-expression compiler | GPL-3.0 | ✅ Implemented |
-| **Routing** | FreeRouting | GPL-3.0 | ✅ Integrated |
+| **Routing** | FreeRouting | GPL-3.0 | ⛔ Blocked (Java 25 jars, Java 21 runtime) |
 | **Simulation** | ngspice | BSD-3-Clause | ✅ Integrated |
 | **CLI** | Python argparse | GPL-3.0 | ✅ Implemented |
+| **API** | FastAPI | MIT | ✅ Implemented |
+| **LLM** | Ollama / OpenAI-compatible / Anthropic | provider-specific | ✅ Integrated |
 
-*Planned: FastAPI/PostgreSQL (Backend), React/TypeScript/Yjs (Frontend)*
-
----
-
-## License
-
-This project is licensed under **GNU GPL-3.0**. Third-party components,
-their licenses, and the KiCad library exception that permits generated designs
-to be used freely are documented in `CREDITS.md`.
-
-**Important:** The GPL-3.0 license applies to the code you write. External GPLv3 tools (KiCad, FreeRouting) are used via subprocess calls, which helps maintain license separation.
+*Implemented: FastAPI backend (`src/api/`), React/TypeScript/Yjs frontend (`frontend/`).*
+*Planned: PostgreSQL persistence; datasheet understanding.*
 
 ---
 
@@ -386,7 +334,7 @@ to be used freely are documented in `CREDITS.md`.
 ### Quick start
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/wachin/AI-Powered-Electronics-Design-Platform
 cd AI-Powered-Electronics-Design-Platform
 
 python3 -m venv venv
@@ -448,6 +396,43 @@ Note: a small local model on CPU is slow (roughly 5–6 generated tokens/second 
 the reference machine, so budget a minute or more per attempt). Hosted endpoints
 are far quicker for interactive use. See `docs/llm-pipeline.md`.
 
+## CLI Usage
+
+```bash
+ai-electronics-design --help      # or: python main.py --help
+
+Options:
+  -p, --prompt TEXT         Natural language circuit description
+  -o, --output-dir PATH     Output directory (default: ./output_design)
+  -n, --project-name TEXT   Project name (default: ldo_regulator)
+  --provider {mock,ollama,openai,anthropic}
+                            mock = deterministic generator (default);
+                            ollama = local model; openai = any OpenAI-compatible
+                            endpoint (use --base-url); anthropic = Claude API
+  --model TEXT              Model name for the provider (e.g. qwen2.5:3b)
+  --base-url TEXT           Provider base URL (e.g. http://localhost:11434)
+  --max-repairs INT         How many times an invalid design is sent back (default: 2)
+  --strict                  Fail instead of falling back to the template generator
+  --no-spice                Disable SPICE simulation
+  --no-routing              Disable PCB auto-routing
+```
+
+The CLI exits with status `1` and a clear message when a design cannot be made
+to pass validation, rather than emitting a project that does not work.
+
+### Example Prompts
+
+```bash
+# Voltage regulator
+python main.py -p "Design a 5V to 3.3V LDO regulator circuit with green LED indicator and decoupling capacitors"
+
+# Simple circuit (no SPICE/routing needed)
+python main.py -p "Simple LED circuit with current limiting resistor" --no-spice --no-routing
+
+# Buck converter (uses component database search)
+python main.py -p "Create a 12V to 5V buck converter 3A output"
+```
+
 ### Requirements
 
 | Requirement | Needed for | Notes |
@@ -494,59 +479,36 @@ sudo apt-get install -y \
 > On Debian/Ubuntu, `kicad-cli` ships inside the `kicad` package; installing a
 > separate `kicad-cli` package is not needed on current releases.
 
-### Python Virtual Environment (One-Time Setup)
-
-Create and configure the virtual environment **once**:
+### Python environment (one-time setup)
 
 ```bash
-# Clone the repository
 git clone https://github.com/wachin/AI-Powered-Electronics-Design-Platform
 cd AI-Powered-Electronics-Design-Platform
 
-# Initialize submodules (reference implementations)
-git submodule update --init --recursive
-
-# Create virtual environment (ONLY ONCE)
-# Note: Use `python3` (not python3.11) - the system's default python3
-# The python3-venv package will install the appropriate venv module
 python3 -m venv venv
-
-# Activate virtual environment
 source venv/bin/activate
 
-# Upgrade pip and install dependencies
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -e ".[dev]"        # runtime + test dependencies
 
-# Install external submodule tools (optional, for development)
-# IMPORTANT: There is a KNOWN INCOMPATIBILITY between kicad-mcp-server and pcbparts-mcp:
-# - kicad-mcp-server requires mcp>=1.27 (installs mcp 1.30.0)
-# - pcbparts-mcp requires mcp==1.25.0 (exact version)
-# THESE ARE FUNDAMENTALLY INCOMPATIBLE - you cannot have both installed simultaneously.
-# 
-# Choose ONE of the following options:
-# 
-# Option A: Use kicad-mcp-server (recommended for KiCad MCP integration)
-pip install -e external/kicad-mcp-server
-pip install -e external/kicad-tools
-# DO NOT install pcbparts-mcp if you need kicad-mcp-server
-
-# Option B: Use pcbparts-mcp (for PCB parts database)
-# pip install -e external/pcbparts-mcp
-# pip install -e external/kicad-tools
-# # DO NOT install kicad-mcp-server if you need pcbparts-mcp
-
-# Verify installations
+# Confirm the tools this project depends on
 kicad-cli --version
 ngspice --version
 ```
 
-# Verify installations
-kicad-cli --version
-ngspice --version
+The `external/` submodules are **not** installed and are **not** dependencies.
+Do not `pip install -e external/...`: those repositories exist only to be read,
+and installing them risks version conflicts (for example `kicad-mcp-server` and
+`pcbparts-mcp` require mutually exclusive versions of `mcp`). See `AGENTS.md`.
+
+If you want them present for reading:
+
+```bash
+git submodule update --init --recursive   # optional, reference material only
 ```
 
 ---
+
 
 ## Daily Usage (Every Session)
 
@@ -558,64 +520,60 @@ ngspice --version
 # Activate environment (every session)
 source venv/bin/activate
 
-# Run tests
-PYTHONPATH=. pytest tests/ -v
+# Run tests (pytest config lives in pyproject.toml)
+pytest -q
 
-# Run design pipeline
-python main.py -p "Design a 5V to 3.3V LDO regulator with LED indicator"
+# Generate a design
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED"
 
-# Run without SPICE/routing for quick testing
-python main.py -p "Simple LED circuit" --no-spice --no-routing
+# Quick run without SPICE
+ai-electronics-design -p "Simple LED circuit" --no-spice --no-routing
+
+# Single test file, or with coverage
+pytest tests/test_erc.py -v
+pytest --cov=src --cov-report=term-missing
 
 # Deactivate when done
 deactivate
 ```
 
-## 1. Activate Virtual Environment
+You'll see `(venv)` in your prompt while the environment is active.
+
+> PCB auto-routing is currently blocked, so `--no-routing` is the practical
+> default. See [Known Limitations](#known-limitations).
+
+---
+
+## Web Interface (API + Frontend)
+
+The same pipeline is exposed as a REST API with a React frontend.
 
 ```bash
-cd AI-Powered-Electronics-Design-Platform
+# Terminal 1 — backend on http://localhost:8000
 source venv/bin/activate
+uvicorn src.api.main:app --reload --port 8000
+
+# Terminal 2 — frontend on http://localhost:5173 (proxies /api to :8000)
+cd frontend
+npm install
+npm run dev
 ```
 
-You'll see `(venv)` in your prompt, indicating the virtual environment is active.
+Useful endpoints:
 
-### 2. Run Tests
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/api/design` | Submit a prompt and start a design job |
+| `GET` | `/api/jobs/{job_id}` | Poll job status and results |
+| `GET` | `/api/jobs` | List jobs |
+| `GET` | `/api/components/search` | Search the component database |
+| `WS` | `/api/collaboration/ws/{room_id}/{user_id}/{user_name}` | Real-time collaboration |
 
-```bash
-# Run all tests
-PYTHONPATH=. pytest tests/ -v
-
-# Run specific test file
-PYTHONPATH=. pytest tests/test_ai_agent.py -v
-
-# Run with coverage
-PYTHONPATH=. pytest tests/ --cov=src --cov-report=term-missing
-```
-
-### 3. Run the Design Pipeline
-
-```bash
-# Full pipeline (ERC + SPICE + KiCad + FreeRouting)
-python main.py -p "Design a 5V to 3.3V LDO regulator with LED indicator"
-
-# Without SPICE simulation
-python main.py -p "Design a 5V to 3.3V LDO regulator" --no-spice
-
-# Without PCB auto-routing
-python main.py -p "Simple LED circuit" --no-routing
-
-# Minimal (ERC + KiCad only)
-python main.py -p "Simple LED circuit" --no-spice --no-routing
-```
-
-### 4. Deactivate Virtual Environment
-
-When you're done working:
-
-```bash
-deactivate
-```
+> **Security note:** the API currently ships with permissive CORS
+> (`allow_origins=["*"]`) and no authentication, and it is not bound by the
+> permission system. Do not expose it to an untrusted network as-is. See
+> `ROADMAP.md` section 22.
 
 ---
 
@@ -625,10 +583,10 @@ deactivate
 |------|-----------|----------|
 | **Install system packages** | **ONCE** | `sudo apt-get install ...` |
 | **Create virtual environment** | **ONCE** | `python3 -m venv venv` |
-| **Install Python dependencies** | **ONCE** | `pip install -r requirements.txt` |
+| **Install Python dependencies** | **ONCE** | `pip install -e ".[dev]"` |
 | **Activate virtual environment** | **EVERY SESSION** | `source venv/bin/activate` |
-| **Run tests** | **EVERY SESSION** | `PYTHONPATH=. pytest tests/ -v` |
-| **Run design pipeline** | **EVERY SESSION** | `python main.py -p "..."` |
+| **Run tests** | **EVERY SESSION** | `pytest -q` |
+| **Run design pipeline** | **EVERY SESSION** | `ai-electronics-design -p "..."` |
 | **Deactivate venv** | **EVERY SESSION** | `deactivate` |
 
 > **⚠️ IMPORTANT:** Do NOT re-run the one-time setup steps (installing packages, creating venv, pip install) every time. They only need to be done once. The virtual environment activation and test execution must be done every time you start a new terminal session.
@@ -651,11 +609,10 @@ python -c "import src; print('Python imports OK')"
 | Package | Purpose |
 |---------|---------|
 | `python3-venv` | Virtual environment support (installs python3.13-venv) |
-| `kicad`, `kicad-cli` | Primary EDA engine |
-| `librepcb`, `horizon-eda` | Alternative EDA engines |
-| `ngspice`, `ngspice-dev`, `ngspice-doc` | SPICE simulation CLI + docs |
-| `librepcb`, `horizon-eda` | Alternative EDA engines |
-| `kicad-footprints`, `kicad-symbols`, `kicad-templates` | KiCad libraries (via kicad-libraries) |
+| `kicad` | Primary EDA engine; provides `kicad-cli` |
+| `kicad-footprints`, `kicad-symbols`, `kicad-templates` | KiCad libraries — **required**, read at runtime by the generators |
+| `ngspice` | SPICE simulation CLI |
+| `librepcb`, `horizon-eda` | Alternative EDA engines (optional) |
 | `sch-rnd-sim` | High-level circuit simulation |
 | `pcb-rnd` | Alternative PCB tool |
 | `default-jre` | Java runtime for FreeRouting |
@@ -667,13 +624,16 @@ python -c "import src; print('Python imports OK')"
 
 | Issue | Solution |
 |-------|----------|
-| `venv/bin/activate: No such file` | Run `python3.11 -m venv venv` first |
-| `ModuleNotFoundError` | Run `pip install -r requirements.txt` with venv active |
-| `kicad-cli: command not found` | Install `kicad` package: `sudo apt-get install kicad` |
-| `ngspice: command not found` | Install ngspice: `sudo apt-get install ngspice` |
-| `pytest: command not found` | Run `pip install pytest` in active venv |
-| `freerouting.jar not found` | Build: `cd external/freerouting && ./gradlew build -x test` |
-| Tests fail with `PermissionError` | Ensure sandbox paths are correct in `src/security/sandbox.py` |
+| `venv/bin/activate: No such file` | Create it: `python3 -m venv venv` (the project targets Python 3.10+; tested on 3.13) |
+| `ModuleNotFoundError: No module named 'src'` | Install the package: `pip install -e ".[dev]"`, or run from the repository root |
+| `ai-electronics-design: command not found` | The console script comes from `pip install -e .`; alternatively run `python main.py` |
+| `kicad-cli: command not found` | `sudo apt-get install kicad` (on current Debian/Ubuntu, `kicad-cli` ships inside the `kicad` package) |
+| Schematic/PCB has no pins or pads | The KiCad symbol/footprint libraries are missing. Install `kicad-symbols` and `kicad-footprints` |
+| `ngspice: command not found` | `sudo apt-get install ngspice`, or pass `--no-spice` |
+| `pytest: command not found` | `pip install -e ".[dev]"` in the active venv |
+| Routing reports a DSN error | Expected: `kicad-cli` has no DSN export in KiCad 7+. See Known Limitations |
+| `UnsupportedClassVersionError` running FreeRouting | The bundled jars need Java 25; install it or skip routing |
+| Tests fail with `PermissionError` | The security sandbox is not wired into the pipeline; report the test and path involved |
 
 ---
 
@@ -681,20 +641,34 @@ python -c "import src; print('Python imports OK')"
 
 The `external/` directory contains Git submodules for reference only. They are **not required** for the main platform to function:
 
+32 submodules are configured in `.gitmodules`, for example:
+
 ```
 external/
-├── kicad-tools/           # KiCad automation utilities
-├── kicad-mcp-server/      # MCP server for KiCad
-├── freerouting/           # Autorouter source (build with ./gradlew)
-├── ngspice/               # SPICE simulator source
-├── circuit-json-to-kicad/ # Circuit JSON converter
-└── pcbparts-mcp/          # Component database tools
+├── kicad/                  # KiCad source
+├── kicad-tools/            # KiCad automation utilities
+├── kicad-mcp-server/       # MCP server for KiCad
+├── circuit-json/           # Circuit JSON format and tooling
+├── tscircuit/              # Circuit JSON → PCB toolchain
+├── skidl/                  # Netlist generation from Python
+├── atopile/                # Hardware description language
+├── freerouting/            # Autorouter source
+├── ngspice/  pyspice/      # SPICE simulators
+├── yjs/  automerge/        # CRDT libraries
+├── jlcparts/               # Component catalog generator
+├── librepcb/  ecad-viewer/ # Alternative EDA tools
+└── ...                     # (see research/repository_catalog.md)
 ```
 
-Initialize submodules if you want to explore them:
+
+The main platform does **not** require any of them. Initialise only if you want
+to study them:
+
 ```bash
 git submodule update --init --recursive
 ```
+
+Submodules are reference material, never dependencies — see `AGENTS.md`.
 
 ---
 
@@ -715,42 +689,6 @@ The acceptance tests (`test_kicad_netlist.py`, `test_kicad_pcb.py`) ask KiCad to
 read generated output — netlist extraction, DRC and Gerber/drill export. They
 skip automatically when `kicad-cli` is not installed, and fail instead of
 skipping when `DSH_REQUIRE_KICAD=1` is set (as CI does).
-
----
-
-## Legal Notice
-
-⚠️ **IMPORTANT:** This software is an independent open-source implementation that does NOT copy or derive from Flux.ai. See `LEGAL_NOTICE.md` and `LEGAL_DISCLAIMER.md` for details. `research/flux-ai-patent-search.md` explains how to look up Flux.ai patents and compare them against this repository yourself; it contains no patent numbers, because the maintainers have not run a citable search.
-
----
-
-*This project is licensed under GNU GPL-3.0. See `LICENSE` file for details.*
-
-## CLI Usage
-
-```bash
-python main.py --help
-
-Options:
-  -p, --prompt TEXT       Natural language circuit description
-  -o, --output-dir PATH   Output directory (default: ./output_design)
-  -n, --project-name TEXT Project name (default: ldo_regulator)
-  --no-spice              Disable SPICE simulation
-  --no-routing            Disable PCB auto-routing
-```
-
-### Example Prompts
-
-```bash
-# Voltage regulator
-python main.py -p "Design a 5V to 3.3V LDO regulator circuit with green LED indicator and decoupling capacitors"
-
-# Simple circuit (no SPICE/routing needed)
-python main.py -p "Simple LED circuit with current limiting resistor" --no-spice --no-routing
-
-# Buck converter (uses component database search)
-python main.py -p "Create a 12V to 5V buck converter 3A output"
-```
 
 ---
 
@@ -833,28 +771,56 @@ AI-Powered-Electronics-Design-Platform/
 │   └── tsconfig.json               # TypeScript config
 ├── api_output/                      # Runtime output (gitignored)
 │   └── <job_id>/                   # Per-job KiCad project files
-├── external/                        # Git submodules (reference only)
-│   ├── kicad-tools/
-│   ├── kicad-mcp-server/
-│   ├── freerouting/
-│   ├── ngspice/
-│   ├── circuit-json-to-kicad/
-│   └── pcbparts-mcp/
+├── external/                        # 32 Git submodules (reference only)
+│   ├── kicad/ kicad-tools/          # KiCad source + automation
+│   ├── circuit-json/ tscircuit/     # Circuit JSON toolchain
+│   ├── freerouting/ ngspice/        # Autorouter + simulator source
+│   ├── jlcparts/                    # Component catalog generator
+│   └── ...                          # see research/repository_catalog.md
 └── research/
-    └── flux-ai-patent-search.md
+    ├── flux-ai-patent-search.md
+    └── repository_catalog.md
 ```
+
+
 
 ---
 
-## Disclaimer
+## Legal
 
-THE AUTHORS PROVIDE NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT. THE AUTHORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
+**License:** GNU GPL-3.0 — see [`LICENSE`](LICENSE). Third-party components,
+their licenses, and the KiCad library exception that lets generated designs be
+used freely are recorded in [`CREDITS.md`](CREDITS.md).
+
+### Independent implementation
+
+**This software is an independent open-source implementation that does not copy
+or derive from Flux.ai.**
+
+Flux.ai is a proprietary commercial product. This project:
+
+- is **not** affiliated with, endorsed by, or connected to Flux Lab Inc.;
+- does **not** use Flux.ai source code, trademarks, or proprietary assets;
+- references Flux.ai only for technical analysis and educational purposes;
+- implements similar functionality using only open-source tools.
+
+See [`LEGAL_NOTICE.md`](LEGAL_NOTICE.md) and
+[`LEGAL_DISCLAIMER.md`](LEGAL_DISCLAIMER.md) for details, and
+[`research/flux-ai-patent-search.md`](research/flux-ai-patent-search.md) for how
+to search Flux.ai patents and verify — subsystem by subsystem — that this
+project is an independent implementation. That file deliberately contains no
+patent numbers, because the maintainers have not run a citable patent search.
+
+### Disclaimer
+
+THE AUTHORS PROVIDE NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT. THE
+AUTHORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM
+THE USE OF THIS SOFTWARE.
 
 PORTABILITY OF THIS SOFTWARE TO YOUR SPECIFIC USE CASE IS YOUR RESPONSIBILITY.
 
----
-
-## Contributing
+### Contributing
 
 If you contribute:
 
@@ -862,38 +828,15 @@ If you contribute:
 2. You represent that you have the right to contribute the code
 3. You accept the project's license
 
----
-
-## Related Documentation
+### Related documentation
 
 | File | Purpose |
-|------|---------|
-| `ROADMAP.md` | Development plan with implementation status checkboxes |
-| `docs/llm-pipeline.md` | LLM pipeline architecture, postmortem, and verified KiCad status |
+|---|---|
+| `ROADMAP.md` | Development plan, with a verified "what is wired in vs orphaned" section |
+| `docs/llm-pipeline.md` | LLM pipeline architecture, postmortem, and verification status |
+| `docs/llm-model-recommendations.md` | Choosing and running a model |
 | `CREDITS.md` | Third-party dependencies, licenses, and the KiCad library exception |
 | `AGENTS.md` | Agent policies for external repositories |
-| `LEGAL_NOTICE.md` | Legal notice |
-| `LEGAL_DISCLAIMER.md` | Legal disclaimer |
-| `research/flux-ai-patent-search.md` | How to search Flux.ai patents and verify independent implementation |
-
----
-
-## Legal Notice
-
-**⚠️ IMPORTANT: READ THIS ENTIRE FILE BEFORE USING THIS SOFTWARE**
-
----
-
-**THIS SOFTWARE IS AN INDEPENDENT OPEN-SOURCE IMPLEMENTATION THAT DOES NOT COPY OR DERIVE FROM FLUX.AI**.
-
-Flux.ai is a proprietary commercial product. This project:
-
-- Is **NOT** affiliated with Flux Lab Inc.
-- Does **NOT** use Flux.ai's source code, trademarks, or proprietary assets
-- References Flux.ai **only** for technical analysis and educational purposes
-- Implements similar functionality using **only open-source tools**
-
-**READ THE FOLLOWING FILES FOR LEGAL INFORMATION:**
-- `LEGAL_NOTICE.md` - Legal considerations
-- `LEGAL_DISCLAIMER.md` - Detailed legal guidance
-- `research/flux-ai-patent-search.md` - How to search Flux.ai patents and verify, subsystem by subsystem, that this project is an independent implementation (this project does **not** use, implement, or derive from any Flux.ai patents)
+| `LEGAL_NOTICE.md` / `LEGAL_DISCLAIMER.md` | Legal notices |
+| `research/flux-ai-patent-search.md` | Patent search and independence verification |
+| `research/repository_catalog.md` | Evaluated open-source projects and their licenses |
