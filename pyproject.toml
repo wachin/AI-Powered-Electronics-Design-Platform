@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-electronics-design-platform"
+version = "0.1.0"
+description = "Turn a natural-language circuit request into a validated, manufacturable KiCad project"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "AI-Powered Electronics Design Platform contributors" }]
+keywords = ["eda", "kicad", "electronics", "llm", "pcb", "schematic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+# Runtime dependencies are exactly what `src/` imports. `skidl` is intentionally
+# absent: it is studied under `external/` but never imported by this project.
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",        # LLM provider clients
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+ai-electronics-design = "src.cli:main"
+
+[project.urls]
+Documentation = "docs/llm-pipeline.md"
+Credits = "CREDITS.md"
+
+[tool.setuptools]
+# The project uses a `src.` import prefix (from src.core... ), so the top-level
+# `src` package is what gets installed. This is an application, not a library.
+packages = [
+    "src",
+    "src.agents",
+    "src.api",
+    "src.collaboration",
+    "src.components",
+    "src.core",
+    "src.generators",
+    "src.llm",
+    "src.pcb",
+    "src.routing",
+    "src.security",
+    "src.simulation",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `strict` requires the explicit @pytest.mark.asyncio marker, which the suite
+# already uses. Stating it avoids depending on a plugin default.
+asyncio_mode = "strict"
+addopts = "-ra"
+filterwarnings = [
+    "ignore::DeprecationWarning:datetime",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

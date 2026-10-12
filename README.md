@@ -46,6 +46,254 @@ This project builds an AI-powered electronics design platform that transforms na
 
 ---
 
+## How It Works: From a Sentence to a Solderable Board
+
+The platform never asks an AI to write KiCad files. Instead it asks the AI for a
+**structured specification**, then builds the hardware deterministically. That
+split is the core design decision, and this diagram shows the whole path from
+your sentence to a board you can order, assemble and power on.
+
+```
+┌── 1. YOU DESCRIBE THE CIRCUIT ─────────────────────────────────────────────┐
+│                                                                            │
+│   "Design a 5V to 3.3V LDO regulator, 500 mA, with an LED power            │
+│   indicator."                                                              │
+│                                                                            │
+│ This is the only thing you have to write.                                  │
+└───────────────────────────────────────┬────────────────────────────────────┘
+                                        │
+                                        ▼
+┌── 2. THE PLATFORM APPENDS AN OUTPUT CONTRACT ──────────────────────────────┐
+│                                                                            │
+│   Your request is not sent as free text. Two things are attached to it:    │
+│                                                                            │
+│   (a) SYSTEM INSTRUCTIONS                   (b) A JSON SCHEMA              │
+│   - emit JSON only, no prose                { topology,                    │
+│   - use real manufacturer part                components[],                │
+│     numbers                                   connections[],               │
+│   - every pin must exist on                   power_domains,               │
+│     that part                                 design_notes, warnings }     │
+│   - every net needs 2 or more               component: role, mpn, value,   │
+│     pins                                      package, reasoning           │
+│   - an LED needs a series                   connection: from, to, net      │
+│     current-limiting resistor                                              │
+│   - ICs need decoupling caps                                               │
+│   - do not invent part numbers                                             │
+│                                                                            │
+│   Grounding: a short list of REAL catalog part numbers is included, so     │
+│   the model has something concrete to choose from instead of inventing     │
+│   parts.                                                                   │
+└───────────────────────────────────────┬────────────────────────────────────┘
+                                        │
+                                        ▼
+┌── 3. AN AI PRODUCES THE SPECIFICATION ─────────────────────────────────────┐
+│                                                                            │
+│   Local (Ollama) or cloud (OpenAI-compatible / Anthropic): the same        │
+│   contract either way. Ollama receives the schema as its native            │
+│   `format`; OpenAI-compatible endpoints receive it as `response_format:    │
+│   json_schema`. Fenced or chatty replies are still parsed.                 │
+│                                                                            │
+│ The answer is a specification, NOT a schematic:                            │
+│                                                                            │
+│   {"topology": "LDO Linear Regulator",                                     │
+│    "components": [{"role": "regulator", "mpn": "AMS1117-3.3"}],            │
+│    "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}]}        │
+└───────────────────────────────────────┬────────────────────────────────────┘
+                                        │
+                                        ▼
+┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ────────────────┐
+│                                                                            │
+│   The AI never writes KiCad files. Code does that, and code decides        │
+│   whether the answer is physically real:                                   │
+│                                                                            │
+│   ROLE -> TYPE    MPN -> REAL PART  PIN RESOLUTION   BUILD CIRCUIT IR      │
+│   input_capacitor exact catalog hit checked against  components, nets,     │
+│    -> Capacitor   else substitute   the installed    power domains and     │
+│   led_resistor    with the right    KiCad symbol's   designators (U1,      │
+│    -> Resistor    value + package   real pin names   C1, R1, D1 ...)       │
+│        |               |                |                 |                │
+│        +---------------+-------+--------+-----------------+                │
+│                                v                                           │
+│   VALIDATE: schema ok | parts exist | pins exist | 6 ERC rules pass        │
+│                                |                                           │
+│                     errors? ---+- no --> emit KiCad files                  │
+│                                |                                           │
+│                                +- yes -> REPAIR: hand the model the exact  │
+│                                          problems, ask for a corrected     │
+│                                          spec, keep the best attempt       │
+│                                          (up to N tries)                   │
+└───────────────────────────────────────┬────────────────────────────────────┘
+                                        │
+                                        ▼
+┌── 5. WHAT YOU RECEIVE ─────────────────────────────────────────────────────┐
+│                                                                            │
+│   design.kicad_sch  schematic with REAL electrical connectivity            │
+│                     (verified by: kicad-cli sch export netlist)            │
+│   design.kicad_pcb  board with real pads, each on its correct net          │
+│   design.kicad_pro  KiCad project                                          │
+│   design.gltf       3D view                                                │
+│   BOM               REAL, purchasable part numbers and prices              │
+│   gerbers/ + .drl   fabrication files for a board house                    │
+│                                                                            │
+│   KiCad itself checks this output in the test suite: netlist extraction,   │
+│   DRC and Gerber/drill export all run against generated designs.           │
+└───────────────────────────────────────┬────────────────────────────────────┘
+                                        │
+                                        ▼
+┌── 6. YOUR PART ────────────────────────────────────────────────────────────┐
+│                                                                            │
+│   Order parts from the BOM  ->  have the board made from the Gerbers       │
+│   (or etch it yourself)     ->  solder the components  ->  power it on.    │
+│                                                                            │
+│   The design is ERC-clean and uses real parts, so it is something you      │
+│   can actually build -- not a plausible-looking sketch.                    │
+└────────────────────────────────────────────────────────────────────────────┘
+```json fences are still parsed, so a   │
+│   stray wrapper does not break the run.                                    │
+│                                                                            │
+│ The answer is a specification, NOT a schematic:                            │
+│                                                                            │
+│   {"topology": "LDO Linear Regulator",                                     │
+│    "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],       │
+│    "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]}   │
+└────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌── 4. DETERMINISTIC PIPELINE (decides if this is buildable) ───────────────┐
+│                                                                            │
+│   The AI never writes KiCad files. Code does that, and code decides        │
+│   whether the answer is physically real:                                   │
+│                                                                            │
+│   ROLE -> TYPE      MPN -> REAL PART    PIN RESOLUTION      BUILD CIRCUIT IR │
+│   input_capacitor   exact catalog hit   checked against     components, nets, │
+│    -> Capacitor     or a substitute     the installed       power domains, │
+│   led_resistor      with the right      KiCad symbol's      designators (U1, │
+│    -> Resistor      value and package   real pin names      C1, R1, D1 ...) │
+│         │                  │                  │                   │        │
+│         └──────────────────┴────────┬─────────┴───────────────────┘        │
+│                                     ▼                                      │
+│   VALIDATE:  schema ok | parts exist | pins exist | 6 ERC rules pass       │
+│                                     │                                      │
+│                          errors? ───┴─── yes ──> REPAIR: hand the model the │
+│                             │                     exact problems, ask for a │
+│                             │                     corrected spec, keep the │
+│                             │                     best attempt (up to N tries) │
+│                             ▼  no errors                                   │
+└────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌── 5. WHAT YOU RECEIVE ────────────────────────────────────────────────────┐
+│                                                                            │
+│   design.kicad_sch   schematic with REAL electrical connectivity           │
+│                      (verified with: kicad-cli sch export netlist)         │
+│   design.kicad_pcb   board with real pads, each pad on its correct net     │
+│   design.kicad_pro   KiCad project                                         │
+│   design.gltf        3D view                                               │
+│   BOM                REAL, purchasable part numbers, descriptions, prices  │
+│   gerbers/ + .drl    fabrication files for a board house                   │
+│                                                                            │
+│   KiCad itself checks this output in the test suite: netlist extraction,   │
+│   DRC, and Gerber/drill export all run against generated designs.          │
+└────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌── 6. YOUR PART ───────────────────────────────────────────────────────────┐
+│                                                                            │
+│   Order the parts from the BOM  ->  have the board made from the Gerbers   │
+│   (or etch/mill it yourself)    ->  solder the components  ->  power it on. │
+│                                                                            │
+│   The design is ERC-clean and uses real parts, so it is something you      │
+│   can actually build -- not a plausible-looking sketch.                    │
+└────────────────────────────────────────────────────────────────────────────┘
+```json wrapper does not break the run.      │
+│                                                                             │
+│    Output is a specification, NOT a schematic:                              │
+│      {"topology": "LDO Linear Regulator",                                   │
+│       "components": [{"role": "regulator", "mpn": "AMS1117-3.3", ...}],      │
+│       "connections": [{"from": "U1.VIN", "to": "C1.1", "net": "VIN"}, ...]}  │
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. DETERMINISTIC PIPELINE — the part that decides whether this is buildable │
+│                                                                             │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
+│  │ ROLE → TYPE  │   │ MPN → REAL   │   │ PIN RESOLVE  │   │ BUILD CIRCUIT│  │
+│  │ "input_cap"  │   │ PART         │   │ against the  │   │ IR:  comps,  │  │
+│  │  → Capacitor │   │ exact catalog│   │ installed    │   │ nets, power  │  │
+│  │ "led_resist" │   │ hit, else a  │   │ KiCad symbol │   │ domains, with│  │
+│  │  → Resistor  │   │ substitute   │   │ pin names    │   │ designators  │  │
+│  └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘  │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ VALIDATE:  schema ✓   parts exist ✓   pins exist ✓   ERC rules ✓      │  │
+│  └───────────────────────────────┬───────────────────────────────────────┘  │
+│                                  │                                          │
+│                        errors? ──┴── yes ──▶  ┌──────────────────────────┐  │
+│                                              │ REPAIR: send the model   │  │
+│                                              │ the exact problems and   │  │
+│                                              │ ask for a corrected spec │  │
+│                                              └────────────┬─────────────┘  │
+│                                                           │ (up to N tries)│
+│                              no errors ◀──────────────────┘                 │
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. WHAT YOU RECEIVE                                                         │
+│                                                                             │
+│   design.kicad_sch ──► schematic with REAL electrical connectivity          │
+│                        (checks with: kicad-cli sch export netlist)          │
+│   design.kicad_pcb ──► board with real pads, each pad on its correct net    │
+│   design.kicad_pro ──► KiCad project                                        │
+│   design.gltf      ──► 3D view                                              │
+│   design-BOM       ──► bill of materials with REAL, purchasable MPNs,       │
+│                        descriptions and indicative prices                   │
+│   gerbers/ + .drl  ──► fabrication files you can send to a board house      │
+│                                                                             │
+│   Verified by KiCad itself: netlist extraction, DRC, and Gerber/drill       │
+│   export all run against generated output in the test suite.                │
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. YOUR PART                                                               │
+│                                                                             │
+│   Order the parts from the BOM  →  have the board made from the Gerbers     │
+│   (or etch/mill it yourself)    →  solder the components                    │
+│   →  power it on.                                                           │
+│                                                                             │
+│   The design is ERC-clean and uses real parts, so it is a design you can    │
+│   actually build — not a plausible-looking sketch.                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why the contract is appended (and why it matters)
+
+Without the appended schema, a model returns prose or a schematic sketch that no
+program can use. Two details make the contract work in practice:
+
+1. **It is attached to the request, not left to the prompt.** The schema is
+   derived from the same definition the validator enforces, so what the model is
+   asked for and what it is checked against cannot drift apart.
+2. **It constrains wording, not physics.** A perfectly formed JSON answer can
+   still name a part that does not exist or a pin that is not on the symbol.
+   That is why step 4 exists: format is necessary but never sufficient.
+
+### What each later stage does
+
+| Stage | What it does | What would go wrong without it |
+|---|---|---|
+| Role → type | `"input_capacitor"` becomes `Capacitor`, so the right symbol and pins are used | A part with the wrong footprint or no pinout |
+| MPN → real part | Matches the requested part number against the catalog; substitutes a real equivalent when absent | A bill of materials you cannot order |
+| Pin resolution | Resolves pin numbers/names against the installed KiCad symbol, including aliases (`VOUT` → the symbol's real `VO`) | Silent shorts or disconnected nets |
+| Circuit IR build | Assigns designators (U1, C1, R1…) and connects nets | No stable identity for parts or nets |
+| Validation | Schema, MPN existence, pin existence, and 6 ERC rules | A board that looks fine and does not work |
+| Repair loop | Sends the specific errors back to the model and retries, keeping the best attempt | One bad answer ends the run |
+| Emit | Deterministic S-expression writers for schematic and PCB | Files KiCad cannot open or netlist |
+
+---
+
 ## Architecture Overview
 
 ```
@@ -53,7 +301,7 @@ Natural Language Prompt
          │
          ▼
 ┌──────────────────────────────────────┐
-│  AIDesignOrchestrator (pipeline)    │
+│  AIDesignOrchestrator (pipeline)     │
 └──────────────────────────────────────┘
          │
     ┌────┼────┐
@@ -66,13 +314,13 @@ Natural Language Prompt
     │         │            │
     ▼         ▼            ▼
 ┌──────────────────────────────────────┐
-│  KiCad Generator (S-expressions)    │
-│  .kicad_sch  .kicad_pcb  .kicad_pro │
+│  KiCad Generator (S-expressions)     │
+│  .kicad_sch  .kicad_pcb  .kicad_pro  │
 └──────────────────────────────────────┘
     │
     ├─▶ ngspice (SPICE simulation)
-    ├─▶ FreeRouting (PCB auto-routing)
-    └─▶ kicad-cli (ERC/DRC/Gerber/DSN)
+    ├─▶ FreeRouting (PCB auto-routing; see Known Limitations)
+    └─▶ kicad-cli (netlist/ERC/DRC/Gerber/drill)
 ```
 
 ---
@@ -135,6 +383,92 @@ to be used freely are documented in `CREDITS.md`.
 
 ## Getting Started
 
+### Quick start
+
+```bash
+git clone <repository-url>
+cd AI-Powered-Electronics-Design-Platform
+
+python3 -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"          # runtime + test dependencies
+
+# Generate a design with the built-in deterministic generator (no AI needed)
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED indicator" \
+    --no-spice --no-routing -o ./output_design
+
+# Confirm the setup can actually verify its own output
+pytest -q
+```
+
+This writes a KiCad project to `./output_design`:
+
+| File | What it is |
+|---|---|
+| `<name>.kicad_sch` | Schematic with real electrical connectivity |
+| `<name>.kicad_pcb` | Board with real pads, each assigned to its net |
+| `<name>.kicad_pro` | KiCad project |
+| `<name>.gltf` | 3D view |
+| `design_summary.json` | Full result: specification, validation, BOM, notes |
+
+Then either open it in KiCad, or verify it from the command line:
+
+```bash
+kicad-cli sch export netlist --output /tmp/check.net ./output_design/*.kicad_sch
+kicad-cli pcb drc --output /tmp/drc.rpt ./output_design/*.kicad_pcb
+```
+
+### Using a real AI
+
+The `mock` provider (the default) runs the deterministic rule-based generator, so
+you can try the whole pipeline with no API key and no model download. To let a
+model design the circuit instead:
+
+```bash
+# Local model via Ollama
+ollama pull qwen2.5:3b
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator, 500 mA, with an LED" \
+    --provider ollama --model qwen2.5:3b --no-spice --no-routing
+
+# Any OpenAI-compatible endpoint (NVIDIA NIM, Groq, OpenRouter, Gemini, ...)
+export NVIDIA_API_KEY=...
+ai-electronics-design -p "Create a 12V to 5V buck converter, 3A output" \
+    --provider openai --base-url https://integrate.api.nvidia.com/v1 \
+    --model nvidia/nemotron-3-ultra-550b-a55b
+
+# Fail instead of silently falling back to the template generator
+ai-electronics-design -p "..." --provider ollama --strict
+```
+
+Every result reports its own provenance. If the model was unavailable and the
+template generator was used instead, the run says so explicitly — a canned
+design is never presented as an AI-generated one.
+
+Note: a small local model on CPU is slow (roughly 5–6 generated tokens/second on
+the reference machine, so budget a minute or more per attempt). Hosted endpoints
+are far quicker for interactive use. See `docs/llm-pipeline.md`.
+
+### Requirements
+
+| Requirement | Needed for | Notes |
+|---|---|---|
+| Python 3.10+ | Everything | Tested on 3.13 |
+| **KiCad** (9.x) | Schematic/PCB generation, ERC, DRC, Gerbers | Provides `kicad-cli` **and** the symbol/footprint libraries the generators read at runtime. `.kicad_sym` / `.kicad_footprint` data is not vendored — see `CREDITS.md` |
+| ngspice | SPICE simulation | Optional; simulation is reported as failed, not silently skipped, when absent |
+| Node.js 18+ | Web frontend only | Not needed for the CLI |
+| Java 25 | FreeRouting auto-routing | Currently a blocker: every bundled jar targets Java 25 and will not run on Java 21. See Known Limitations |
+
+Verify the system dependencies:
+
+```bash
+kicad-cli --version          # expect 8.x or 9.x
+ngspice --version | head -1
+```
+
+The test suite skips the KiCad acceptance tests when `kicad-cli` is absent. In
+CI, `DSH_REQUIRE_KICAD=1` turns that skip into a failure, so "verified against
+KiCad" can never quietly become "skipped".
+
 ### System Dependencies (.deb packages)
 
 Install required system packages **once**:
@@ -146,18 +480,19 @@ sudo apt-get update
 # Install required system packages
 sudo apt-get install -y \
     python3 python3-venv python3-dev \
-    kicad kicad-cli \
-    ngspice ngspice-dev ngspice-doc \
-    librepcb horizon-eda \
-    kicad-footprints kicad-symbols kicad-templates \
-    default-jre  # For FreeRouting JAR
+    kicad \
+    ngspice \
+    kicad-footprints kicad-symbols kicad-templates
 
-# Optional packages (useful for development)
+# Optional extras
 sudo apt-get install -y \
-    sch-rnd-sim \
-    pcb-rnd \
-    default-jdk  # For FreeRouting development
+    librepcb horizon-eda \
+    sch-rnd-sim pcb-rnd \
+    default-jre  # For FreeRouting (version mismatch — see Known Limitations)
 ```
+
+> On Debian/Ubuntu, `kicad-cli` ships inside the `kicad` package; installing a
+> separate `kicad-cli` package is not needed on current releases.
 
 ### Python Virtual Environment (One-Time Setup)
 
@@ -328,30 +663,6 @@ python -c "import src; print('Python imports OK')"
 
 ---
 
-## Project Structure
-
-```
-AI-Powered-Electronics-Design-Platform/
-├── main.py                          # CLI entry point
-├── requirements.txt                 # Python dependencies
-├── ROADMAP.md                       # Development roadmap
-├── AGENTS.md                        # Agent policies
-├── venv/                            # Virtual environment (created once)
-├── src/
-│   ├── core/                        # Circuit IR, ERC
-│   ├── components/                  # Component database, JLCParts
-│   ├── generators/                  # KiCad S-expression generator
-│   ├── simulation/                  # ngspice integration
-│   ├── routing/                     # FreeRouting wrapper
-│   ├── agents/                      # AI design orchestrator
-│   └── api/                         # FastAPI backend
-├── tests/                           # 63 tests (61 passing, 2 skipped)
-├── frontend/                        # React/TypeScript frontend
-└── external/                        # Git submodules (reference only)
-```
-
----
-
 ## Troubleshooting
 
 | Issue | Solution |
@@ -390,15 +701,20 @@ git submodule update --init --recursive
 ## Running the Full Test Suite
 
 ```bash
-# All tests (63 tests: 61 passing, 2 skipped)
-PYTHONPATH=. pytest tests/ -v
+# Everything (no PYTHONPATH needed: pytest config lives in pyproject.toml)
+pytest -q
 
-# Quick sanity check
-PYTHONPATH=. pytest tests/test_circuit_ir.py tests/test_erc.py -v
+# Just the unit tests, skipping the KiCad acceptance gates
+pytest -q --ignore=tests/test_kicad_netlist.py --ignore=tests/test_kicad_pcb.py
 
 # With coverage
-PYTHONPATH=. pytest tests/ --cov=src --cov-report=term-missing
+pytest --cov=src --cov-report=term-missing
 ```
+
+The acceptance tests (`test_kicad_netlist.py`, `test_kicad_pcb.py`) ask KiCad to
+read generated output — netlist extraction, DRC and Gerber/drill export. They
+skip automatically when `kicad-cli` is not installed, and fail instead of
+skipping when `DSH_REQUIRE_KICAD=1` is set (as CI does).
 
 ---
 
@@ -442,13 +758,23 @@ python main.py -p "Create a 12V to 5V buck converter 3A output"
 
 ```
 AI-Powered-Electronics-Design-Platform/
-├── main.py                          # CLI entry point
-├── requirements.txt                 # Python dependencies
+├── main.py                          # CLI shim (implementation in src/cli.py)
+├── pyproject.toml                   # Packaging, dependencies, pytest config
+├── requirements.txt                 # pip-installable dependency list
 ├── ROADMAP.md                       # Development roadmap with checkboxes
+├── CREDITS.md                       # Third-party licenses (incl. KiCad data)
 ├── AGENTS.md                        # Agent policies
 ├── LEGAL_NOTICE.md                  # Legal notice
 ├── LEGAL_DISCLAIMER.md              # Legal disclaimer
+├── .github/workflows/ci.yml         # CI: tests (with KiCad), frontend, compile
+├── docs/
+│   └── llm-pipeline.md             # Pipeline architecture + verification status
+├── research/
+│   └── flux-ai-patent-search.md    # Patent search + independence verification
+├── tools_check_netlist.py           # Verifies schematic -> real KiCad netlist
+├── tools_e2e_check.py               # End-to-end check against a real LLM
 ├── src/
+│   ├── cli.py                      # CLI implementation
 │   ├── core/
 │   │   ├── circuit_ir.py           # Circuit Intermediate Representation
 │   │   ├── circuit_builder.py      # Specification -> Circuit IR (real parts/pins)
@@ -468,8 +794,15 @@ AI-Powered-Electronics-Design-Platform/
 │   │   └── ngspice.py              # SPICE simulation integration
 │   ├── routing/
 │   │   └── freerouting.py          # FreeRouting autorouter wrapper
+│   ├── pcb/
+│   │   └── smart_placement.py      # Placement engine (NOT yet wired in)
+│   ├── security/
+│   │   ├── permissions.py          # Capability-based permissions (NOT wired in)
+│   │   └── sandbox.py              # Process/path sandboxing (NOT wired in)
 │   ├── agents/
-│   │   └── orchestrator.py         # AI design pipeline
+│   │   ├── orchestrator.py         # AI design pipeline
+│   │   ├── ai_agent.py             # Agent + MCP tools (NOT wired in)
+│   │   └── mcp_client.py           # MCP stdio client
 │   └── api/
 │       └── main.py                 # FastAPI REST API backend
 ├── tests/
@@ -483,6 +816,9 @@ AI-Powered-Electronics-Design-Platform/
 │   ├── test_llm_pipeline_repair.py # validated generation and repair loop
 │   ├── test_ngspice.py
 │   ├── test_freerouting.py
+│   ├── test_smart_placement.py
+│   ├── test_security.py
+│   ├── test_ai_agent.py
 │   └── test_orchestrator.py
 ├── frontend/                        # React/TypeScript web frontend
 │   ├── src/

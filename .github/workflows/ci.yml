@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (with KiCad)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # The acceptance tests verify generated output by asking KiCad itself to
+      # read it: `kicad-cli sch export netlist`, `kicad-cli pcb drc`, and Gerber
+      # export. KiCad also supplies the symbol and footprint libraries that the
+      # generators read at runtime, so this is a real dependency, not a nicety.
+      - name: Install KiCad and ngspice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends kicad ngspice
+          kicad-cli --version
+          ngspice --version | head -1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # DSH_REQUIRE_KICAD=1 turns "kicad-cli missing" from a skip into a failure,
+      # so a broken install cannot masquerade as a green build.
+      - name: Run test suite
+        env:
+          DSH_REQUIRE_KICAD: "1"
+        run: pytest -q
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  compile-check:
+    name: Python compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Cheap guard: catch syntax errors even if a dependency is unavailable.
+      - run: python -m compileall -q src main.py

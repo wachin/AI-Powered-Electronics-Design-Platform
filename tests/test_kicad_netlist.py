@@ -10,13 +10,13 @@ These tests pin down the three things connectivity requires, and — when
 kicad-cli is available — verify with KiCad itself that the netlist is non-empty.
 """
 
-import shutil
 import subprocess
 
 import pytest
 
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
 from src.generators.kicad_generator import KiCadGenerator
+from conftest import requires_kicad
 from src.generators.kicad_symbols import SymbolLibrary, load_symbol
 
 R = "Device:R"
@@ -126,7 +126,7 @@ class TestSchematicConnectivity:
         assert strip(a) == strip(b)
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad
 class TestKiCadAcceptsSchematic:
     """The real acceptance test: KiCad must extract the expected netlist."""
 

@@ -11,7 +11,6 @@ KiCad footprint libraries, and to have every connected pad assigned to its net.
 """
 
 import re
-import shutil
 import subprocess
 
 import pytest
@@ -19,6 +18,7 @@ import pytest
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
 from src.generators.kicad_footprints import load_footprint, place_pads
 from src.generators.kicad_generator import KiCadGenerator
+from conftest import requires_kicad
 
 AMS = "Regulator_Linear:AMS1117-3.3"
 AMS_FP = "Package_TO_SOT_SMD:SOT-223-3_TabPin2"
@@ -137,7 +137,7 @@ class TestPcbGeneration:
         assert text.count("(footprint ") == 4
 
 
-@pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+@requires_kicad
 class TestKiCadAcceptsBoard:
     """The real gate: KiCad must load the board and see connected pads."""
 

@@ -1,9 +1,21 @@
-# AI-Powered Electronics Design Platform Dependencies
+# AI-Powered Electronics Design Platform — runtime dependencies.
+#
+# The authoritative dependency list lives in pyproject.toml. This file mirrors
+# the same set for plain `pip install -r requirements.txt` workflows.
+#
+# Notably absent: `skidl`. It is studied under external/ as a reference but is
+# never imported by this project (see CREDITS.md and AGENTS.md).
+#
+# Also required but NOT installable via pip: KiCad (for kicad-cli, pcbnew and
+# its symbol/footprint libraries) and ngspice. See README.md "Requirements".
 
-pytest>=8.0.0
-pytest-cov>=5.0.0
-pydantic>=2.0.0
 fastapi>=0.100.0
 uvicorn>=0.20.0
-skidl>=1.2.0
+pydantic>=2.0.0
+httpx>=0.24.0
 requests>=2.28.0
+
+# Development / test tooling
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0

@@ -168,7 +168,7 @@ ollama pull qwen2.5:7b      # Better quality (needs ~5.2 GB)
 - Routing failure no longer blocks the design pipeline (graceful degradation)
 
 ### Test Results
-- **62 tests pass**, 2 skipped
+- **the full pytest suite passes**, 2 skipped
 - All LLM integration tests pass (11/11)
 - All orchestrator tests pass
 - All security tests pass
