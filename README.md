@@ -22,18 +22,21 @@ This project builds an AI-powered electronics design platform that transforms na
     validation, and an automatic repair loop (see `docs/llm-pipeline.md`)
 
 **Known Limitations:**
-- ⚠️ **PCB generation is not yet usable.** `generate_pcb()` emits footprints with
-  no pads and track endpoints as designator references rather than coordinates,
-  so `kicad-cli` cannot load a generated board. The schematic is correct and
-  ERC-clean; the PCB compiler needs a rewrite to emit real pads.
+- ⚠️ **Auto-routing cannot run with KiCad 7+.** FreeRouting needs Specctra DSN
+  input, and `kicad-cli pcb export dsn` was removed in KiCad 7 (verified absent
+  in KiCad 9.0.2). Generated boards are unrouted; the router reports a clear
+  error rather than failing silently. Workarounds: KiCad 6 alongside, an external
+  DSN converter, or `pcbnew` scripting.
 - ⚠️ The built-in component catalog only covers common parts; the 600k-part
   jlcparts catalog is used automatically when its offline database is present.
 - ⚠️ The requirement parser fills defaults for unspecified values instead of
   asking the user.
+- ⚠️ A working KiCad installation is required: symbol and footprint libraries
+  are read at runtime (see `CREDITS.md` for licensing).
 
 **Planned / In Progress:**
-- 🔄 PCB pad generation from real KiCad footprint libraries
 - 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
+- 🔄 DSN export path so FreeRouting can run on modern KiCad
 - 🔄 Web Frontend (React/TypeScript + Yjs collaboration)
 - 🔄 Datasheet Extraction (RAG pipeline)
 - 🔄 Smart PCB Placement (thermal, signal integrity)
@@ -122,7 +125,9 @@ Natural Language Prompt
 
 ## License
 
-This project is licensed under **GNU GPL-3.0**.
+This project is licensed under **GNU GPL-3.0**. Third-party components,
+their licenses, and the KiCad library exception that permits generated designs
+to be used freely are documented in `CREDITS.md`.
 
 **Important:** The GPL-3.0 license applies to the code you write. External GPLv3 tools (KiCad, FreeRouting) are used via subprocess calls, which helps maintain license separation.
 
@@ -529,6 +534,7 @@ If you contribute:
 |------|---------|
 | `ROADMAP.md` | Development plan with implementation status checkboxes |
 | `docs/llm-pipeline.md` | LLM pipeline architecture, postmortem, and verified KiCad status |
+| `CREDITS.md` | Third-party dependencies, licenses, and the KiCad library exception |
 | `AGENTS.md` | Agent policies for external repositories |
 | `LEGAL_NOTICE.md` | Legal notice |
 | `LEGAL_DISCLAIMER.md` | Legal disclaimer |

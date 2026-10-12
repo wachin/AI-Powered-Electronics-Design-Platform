@@ -6,11 +6,22 @@ Compiles CircuitIR into valid KiCad 8 file structures (.kicad_sch, .kicad_pcb, .
 
 import json
 import logging
+import math
 import uuid
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
 from src.core.circuit_ir import CircuitIR, Component, Net, ComponentType
 from src.generators.kicad_symbols import get_symbol_library
+from src.generators.kicad_footprints import (
+    get_footprint_library,
+    place_pads,
+    _parse,
+    _render_sexpr,
+    _set_property,
+    _tokenize,
+    _find_node,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +31,12 @@ class KiCadGenerator:
     Generator that compiles CircuitIR canonical data structures into executable KiCad projects.
     """
 
-    def __init__(self, circuit: CircuitIR):
+    def __init__(self, circuit: CircuitIR, route_pcb: bool = False):
         self.circuit = circuit
+        # Straight-line stub routing usually shorts other nets, producing DRC
+        # errors. Real routing belongs to FreeRouting, so leave the board
+        # unrouted by default: pads carry the nets, which is what matters.
+        self.route_pcb = route_pcb
 
     def export_project(self, output_dir: Path, project_name: str = "design") -> Dict[str, Path]:
         """
@@ -218,85 +233,100 @@ class KiCadGenerator:
   )"""
 
     def generate_pcb(self) -> str:
-        """Generates valid KiCad 8 PCB layout S-expression format."""
-        pcb_uuid = str(uuid.uuid4())
-        
-        footprints_sexpr = []
-        x_pos = 100.0
-        y_pos = 100.0
+        """
+        Generate a KiCad PCB whose footprints carry real pads and assigned nets.
 
-        # Build net-to-pads mapping for track routing
-        net_pads = {}  # net_name -> [(ref, pad_number), ...]
-        for ref, comp in self.circuit.components.items():
+        The previous implementation wrote `(footprint "Lib:Name" ...)` blocks
+        containing no `(pad ...)` elements and connected nets with
+        `(segment (start D1.2) (end R1.2) ...)` -- designator references where
+        KiCad requires coordinates. `kicad-cli` refused to load the result
+        ("Failed to load board"), so DRC, Gerber export and routing could not
+        work on a generated design.
+
+        Pads are copied from the locally installed KiCad footprint libraries
+        (see `src/generators/kicad_footprints.py`). Using the real definitions
+        guarantees pad numbers match the pin numbers from the netlist, which is
+        what makes net assignment meaningful.
+
+        Every net is declared at board level and assigned to the pads that
+        belong to it, so KiCad reports no unconnected pads and FreeRouting has
+        the correct connectivity to route. Copper is left to the router
+        (`route_pcb=True` emits naive stub tracks for inspection only).
+        """
+        library = get_footprint_library()
+
+        # Assign a stable number to every net (0 is reserved for "no net").
+        net_numbers: Dict[str, int] = {}
+        for comp in self.circuit.components.values():
             for pin in comp.pins:
-                if pin.connected_net:
-                    net_name = pin.connected_net
-                    if net_name not in net_pads:
-                        net_pads[net_name] = []
-                    net_pads[net_name].append((ref, pin.number))
+                if pin.connected_net and pin.connected_net not in net_numbers:
+                    net_numbers[pin.connected_net] = len(net_numbers) + 1
 
-        # Generate footprints
-        x_pos = 100.0
-        y_pos = 100.0
+        footprints: List[str] = []
+        placements: Dict[str, Dict[str, Tuple[float, float]]] = {}
+        pad_nets_by_ref: Dict[str, Dict[str, str]] = {}
+        unresolved: List[str] = []
 
-        for ref, comp in self.circuit.components.items():
-            fp_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{self.circuit.id}_{ref}_fp"))
-            fp_name = comp.footprint if comp.footprint else "Resistor_SMD:R_0805_2012Metric"
-            
-            footprints_sexpr.append(f"""  (footprint "{fp_name}"
-    (layer "F.Cu")
-    (at {x_pos:.2f} {y_pos:.2f})
-    (uuid "{fp_uuid}")
-    (property "Reference" "{ref}" (at 0 -2.5 0) (layer "F.SilkS")
-      (effects (font (size 1 1) (thickness 0.15)))
-    )
-    (property "Value" "{comp.value}" (at 0 2.5 0) (layer "F.Fab")
-      (effects (font (size 1 1) (thickness 0.15)))
-    )
-  )""")
-            
-            x_pos += 15.0
-            if x_pos > 180.0:
-                x_pos = 100.0
-                y_pos += 15.0
+        total = max(len(self.circuit.components), 1)
+        cols = max(1, int(math.ceil(math.sqrt(total))))
+        x0, y0, pitch = 60.0, 60.0, 30.0
 
-        footprints_block = "\n".join(footprints_sexpr)
+        for index, (ref, comp) in enumerate(self.circuit.components.items()):
+            col, row = index % cols, index // cols
+            at_x = x0 + col * pitch
+            at_y = y0 + row * pitch
 
-        # Generate net definitions
-        nets_sexpr = []
-        for net_name, pads in net_pads.items():
-            net_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{self.circuit.id}_net_{net_name}"))
-            pads_str = " ".join([f'("{ref}" "{pad}")' for ref, pad in pads])
-            nets_sexpr.append(f"""  (net
-    (name "{net_name}")
-    (uuid "{net_uuid}")
-    (pins {pads_str})
-  )""")
+            definition = library.load(comp.footprint) if comp.footprint else None
+            if definition is None:
+                unresolved.append(f"{ref} ({comp.footprint or 'no footprint'})")
+                continue
 
-        nets_block = "\n".join(nets_sexpr)
+            # Nets for this footprint's pads, keyed by pad number.
+            pad_nets: Dict[str, Tuple[int, str]] = {}
+            for pin in comp.pins:
+                if not pin.connected_net:
+                    continue
+                pad_nets[str(pin.number)] = (
+                    net_numbers[pin.connected_net],
+                    pin.connected_net,
+                )
 
-        # Generate simple track connections (straight lines between connected pads)
-        tracks_sexpr = []
-        track_id = 0
-        for net_name, pads in net_pads.items():
-            if len(pads) >= 2:
-                # Connect first pad to each subsequent pad with a track
-                ref1, pad1 = pads[0]
-                # Find pin positions (we'll use footprint center as approximation)
-                for ref2, pad2 in pads[1:]:
-                    track_id += 1
-                    track_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{self.circuit.id}_track_{track_id}"))
-                    # Use simple routing: horizontal then vertical
-                    tracks_sexpr.append(f"""  (segment
-    (start {ref1}.{pad1})
-    (end {ref2}.{pad2})
-    (width 0.25)
-    (layer "F.Cu")
-    (net "{net_name}")
-    (uuid "{track_uuid}")
-  )""")
+            footprints.append(
+                self._render_footprint(ref, comp, definition, at_x, at_y, pad_nets)
+            )
 
-        tracks_block = "\n".join(tracks_sexpr)
+            # Absolute pad coordinates, and which net each pad belongs to.
+            positions: Dict[str, Tuple[float, float]] = {}
+            net_names: Dict[str, str] = {}
+            for pad in place_pads(definition, at_x, at_y, 0.0):
+                positions.setdefault(pad.number, (pad.x, pad.y))
+                net = pad_nets.get(pad.number)
+                if net is not None:
+                    net_names.setdefault(pad.number, net[1])
+            placements[ref] = positions
+            pad_nets_by_ref[ref] = net_names
+
+        if unresolved:
+            logger.warning(
+                "PCB incomplete; footprint not found in installed KiCad "
+                "libraries for: %s",
+                ", ".join(unresolved),
+            )
+
+        tracks = (
+            self._route_tracks(placements, pad_nets_by_ref, net_numbers)
+            if self.route_pcb
+            else []
+        )
+
+        net_decls = ['  (net 0 "")']
+        for name, number in sorted(net_numbers.items(), key=lambda kv: kv[1]):
+            net_decls.append(f'  (net {number} "{name}")')
+
+        footprints_block = "\n".join(footprints)
+        tracks_block = "\n".join(tracks)
+        nets_block = "\n".join(net_decls)
+        outline = self._render_board_outline()
 
         return f"""(kicad_pcb
   (version 20240108)
@@ -318,18 +348,117 @@ class KiCadGenerator:
   (setup
     (pad_to_mask_clearance 0.05)
   )
-{footprints_block}
-
 {nets_block}
-
+{footprints_block}
 {tracks_block}
-
-  (gr_line (start 50 50) (end 200 50) (layer "Edge.Cuts") (width 0.1))
-  (gr_line (start 200 50) (end 200 150) (layer "Edge.Cuts") (width 0.1))
-  (gr_line (start 200 150) (end 50 150) (layer "Edge.Cuts") (width 0.1))
-  (gr_line (start 50 150) (end 50 50) (layer "Edge.Cuts") (width 0.1))
+{outline}
 )
 """
+
+    def _render_footprint(self, ref, comp, definition, at_x, at_y, pad_nets) -> str:
+        """Place one library footprint onto the board with nets attached."""
+        roots = _parse(_tokenize(definition.raw_text))
+        fp_node = _find_node(roots, "footprint")
+        if fp_node is None:  # pragma: no cover - defensive
+            return ""
+
+        # Use the library-qualified id so KiCad can match the library symbol.
+        fp_node[1] = definition.lib_id
+
+        # Drop library-file-level metadata that does not belong on a board.
+        for key in ("version", "generator", "generator_version"):
+            for child in list(fp_node):
+                if isinstance(child, list) and child and child[0] == key:
+                    fp_node.remove(child)
+
+        _set_property(fp_node, "Reference", ref)
+        _set_property(fp_node, "Value", comp.value)
+
+        # Position the footprint just after its layer declaration.
+        for i, child in enumerate(fp_node):
+            if isinstance(child, list) and child and child[0] == "layer":
+                fp_node.insert(i + 1, ["at", f"{at_x:.4f}", f"{at_y:.4f}"])
+                break
+        fp_node.append(["uuid", self._uuid(ref, "footprint")])
+
+        # Attach a net to every pad that has one. Pads sharing a number (for
+        # example a SOT-223 tab) all receive the same net.
+        for child in fp_node:
+            if not isinstance(child, list) or not child or child[0] != "pad":
+                continue
+            if len(child) < 2:
+                continue
+            net = pad_nets.get(str(child[1]))
+            if net is None:
+                continue
+            number, name = net
+            child.append(["net", str(number), name])
+
+        return "  " + _render_sexpr(fp_node).replace("\n", "\n  ")
+
+    def _route_tracks(
+        self,
+        placements: Dict[str, Dict[str, Tuple[float, float]]],
+        pad_nets_by_ref: Dict[str, Dict[str, str]],
+        net_numbers: Dict[str, int],
+    ) -> List[str]:
+        """
+        Emit a starting track for each pair of pads sharing a net.
+
+        Each connection becomes two orthogonal segments (an L route) using real
+        pad coordinates, giving the board actual copper and giving FreeRouting a
+        connected starting point.
+        """
+        # net name -> [(ref, pad number, x, y)]
+        net_pads: Dict[str, List[Tuple[str, str, float, float]]] = {}
+        for ref, net_names in pad_nets_by_ref.items():
+            positions = placements.get(ref, {})
+            for pad_number, net_name in net_names.items():
+                position = positions.get(pad_number)
+                if position is None:
+                    continue
+                net_pads.setdefault(net_name, []).append(
+                    (ref, pad_number, position[0], position[1])
+                )
+
+        tracks: List[str] = []
+        track_count = 0
+        for net_name, pins in net_pads.items():
+            if len(pins) < 2:
+                continue
+            anchor = pins[0]
+            for other in pins[1:]:
+                # L-shaped route: horizontal from the anchor, then vertical.
+                corner = (other[2], anchor[3])
+                for start, end in (
+                    ((anchor[2], anchor[3]), corner),
+                    (corner, (other[2], other[3])),
+                ):
+                    if start == end:
+                        continue
+                    track_count += 1
+                    tracks.append(
+                        f'  (segment (start {start[0]:.4f} {start[1]:.4f}) '
+                        f'(end {end[0]:.4f} {end[1]:.4f}) (width 0.25) '
+                        f'(layer "F.Cu") (net {net_numbers[net_name]}) '
+                        f'(uuid "{self._uuid("track", track_count)}"))'
+                    )
+        return tracks
+
+    @staticmethod
+    def _render_board_outline() -> str:
+        """A plain rectangular board outline sized around the placement grid."""
+        left, top, right, bottom = 40.0, 40.0, 220.0, 160.0
+        corners = [
+            (left, top), (right, top), (right, bottom), (left, bottom), (left, top),
+        ]
+        lines = []
+        for (x1, y1), (x2, y2) in zip(corners, corners[1:]):
+            lines.append(
+                f'  (gr_line (start {x1:g} {y1:g}) (end {x2:g} {y2:g}) '
+                f'(layer "Edge.Cuts") (width 0.1))'
+            )
+        return "\n".join(lines)
 
     def generate_project_config(self, project_name: str) -> str:
         """Generates KiCad project JSON file (.kicad_pro)."""

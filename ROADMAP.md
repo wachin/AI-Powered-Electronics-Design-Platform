@@ -631,30 +631,7 @@ Determine how the browser could show:
 
 ---
 
-# 14. COLLABORATION AND VERSION CONTROL
-
-- [ ] **PENDING** - Not yet implemented
-
-Flux has a collaborative browser workflow.
-
-Research open-source technologies for:
-
-* [ ] real-time collaboration
-* [ ] CRDT
-* [ ] operational transformation
-* [ ] project history
-* [ ] snapshots
-* [ ] comments
-* [ ] permissions
-* [ ] Git integration
-
-Investigate whether a KiCad project can reasonably be version-controlled using Git.
-
-Determine how multiple users could safely edit the same design.
-
----
-
-# 15. AI AGENT TOOL ARCHITECTURE
+# 14. AI AGENT TOOL ARCHITECTURE
 
 - [ ] **PENDING** - Not yet implemented (current orchestrator is deterministic pipeline, not LLM agent)
 
@@ -691,7 +668,7 @@ For each tool determine:
 
 ---
 
-# 16. SECURITY
+# 15. SECURITY
 
 - [x] **IMPLEMENTED** - Permission system and sandboxing (src/security/permissions.py, src/security/sandbox.py)
   - Capability-based permission system with roles (Viewer, Designer, Engineer, Admin, AI Agent)
@@ -726,7 +703,7 @@ The AI should not automatically perform dangerous or irreversible operations wit
 
 ---
 
-# 17. FIND EXISTING PROJECTS WE CAN LEARN FROM
+# 16. FIND EXISTING PROJECTS WE CAN LEARN FROM
 
 - [x] **COMPLETE** - 25 repositories cataloged in research/repository_catalog.md
 
@@ -761,7 +738,7 @@ Search terms should include combinations such as:
 
 ---
 
-# 18. CREATE A REPOSITORY CATALOG
+# 17. CREATE A REPOSITORY CATALOG
 
 - [x] **COMPLETE** - Catalog created at research/repository_catalog.md with 25 repositories
 
@@ -787,7 +764,7 @@ Do not rank projects simply by popularity.
 
 ---
 
-# 19. IDENTIFY THE MOST IMPORTANT BUILDING BLOCKS
+# 18. IDENTIFY THE MOST IMPORTANT BUILDING BLOCKS
 
 - [x] **COMPLETE** - Core subsystems identified, implemented, and integrated
 
@@ -822,7 +799,7 @@ Subsystems should include:
 
 ---
 
-# 20. PROPOSE AN ARCHITECTURE
+# 19. PROPOSE AN ARCHITECTURE
 
 - [~] **PARTIALLY COMPLETE** - Architecture emerged organically; documented in code structure
 
@@ -867,7 +844,7 @@ Do NOT simply choose the architecture because it sounds modern.
 
 ---
 
-# 21. PROPOSE A REALISTIC MVP
+# 20. PROPOSE A REALISTIC MVP
 
 - [x] **ACHIEVED for the covered topologies** - Natural language → validated KiCad project works end to end with a real LLM; missing-requirement questioning is still not implemented
 
@@ -907,7 +884,7 @@ LED).
 
 ---
 
-# 22. PROPOSE A DEVELOPMENT ROADMAP
+# 21. PROPOSE A DEVELOPMENT ROADMAP
 
 - [~] **PARTIALLY EXECUTED** - Phases 0-12 complete; phases 13-14 pending
 
@@ -945,18 +922,30 @@ Create a phased roadmap:
 - [x] **COMPLETE** - Smart placement with collision avoidance, thermal awareness, signal integrity (src/pcb/smart_placement.py)
 
 ## Phase 9 — PCB routing
-- [x] **COMPLETE** - FreeRouting integration (src/routing/freerouting.py)
+- [~] **BLOCKED BY UPSTREAM** - FreeRouting integration exists
+  (src/routing/freerouting.py) but cannot currently run: FreeRouting requires
+  Specctra DSN input, and `kicad-cli pcb export dsn` **was removed in KiCad 7+**
+  (verified absent in the installed KiCad 9.0.2; `kicad-cli pcb export` lists no
+  DSN subcommand). The module already detects this and returns a clear error
+  instead of failing silently. Options: KiCad 6 alongside, an external DSN
+  converter, or `pcbnew` Python scripting.
 
 ## Phase 10 — DRC
 - [x] **COMPLETE** - Via kicad-cli pcb drc
-- [ ] **GAP** - `generate_pcb()` does not emit footprint pads and writes track
-  endpoints as designator references (`(start D1.2)`) instead of coordinates, so
-  `kicad-cli` cannot load a *generated* board ("Failed to load board"). The DRC
-  integration itself works on valid boards; the generated PCB is not yet valid.
-  Fix by copying pad definitions from `/usr/share/kicad/footprints/*.pretty/`.
+- [x] **FIXED (2026-10)** - `generate_pcb()` previously emitted no pads and wrote
+  track endpoints as designator references (`(start D1.2)`), so KiCad could not
+  load a generated board. It now emits real pads and assigned nets, copied from
+  the installed KiCad footprint libraries (`src/generators/kicad_footprints.py`).
+  Verified: `kicad-cli pcb drc` loads a generated board and reports **0
+  unconnected pads**, 0 shorts and 0 crossing tracks (an unrouted board
+  legitimately reports unconnected pads until it is routed).
+  Stub routing is now opt-in (`KiCadGenerator(circuit, route_pcb=True)`) because
+  straight-line stubs short other nets; real routing belongs to FreeRouting.
 
 ## Phase 11 — Manufacturing files
-- [x] **COMPLETE** - Gerber export via kicad-cli; BOM generation
+- [x] **COMPLETE** - Gerber/drill export via kicad-cli; BOM generation
+- [x] **VERIFIED (2026-10)** - Gerbers and drill files export successfully from a
+  *generated* board, which was impossible while the board would not load.
 
 ## Phase 12 — Web interface
 - [x] **COMPLETE** - React/TypeScript frontend (frontend/) + FastAPI backend (src/api/main.py)
@@ -986,7 +975,7 @@ For each phase specify:
 
 ---
 
-# 23. TECHNOLOGY PREFERENCES
+# 22. TECHNOLOGY PREFERENCES
 
 - [x] **FOLLOWED** - Current implementation aligns with preferences
 
@@ -1017,7 +1006,7 @@ The system should not require users to have expensive proprietary software.
 
 ---
 
-# 24. LICENSE ANALYSIS
+# 23. LICENSE ANALYSIS
 
 - [~] **PARTIALLY COMPLETE** - Core dependencies analyzed; full table not produced
 
@@ -1052,7 +1041,7 @@ Instead, identify license compatibility issues that should be reviewed.
 
 ---
 
-# 25. FINAL REPORT
+# 24. FINAL REPORT
 
 - [ ] **PENDING** - This ROADMAP.md serves as living technical foundation
 
@@ -1086,7 +1075,7 @@ The report must contain:
 
 ---
 
-# 26. VERY IMPORTANT: DO NOT WRITE THE APPLICATION YET
+# 25. VERY IMPORTANT: DO NOT WRITE THE APPLICATION YET
 
 - [~] **PARTIALLY VIOLATED** - Application code written (src/, main.py, tests/) before research complete
   * Rationale: Prototyping validated architecture choices (CircuitIR, KiCad S-expr, JLCParts, ERC, SPICE, FreeRouting)
@@ -1118,7 +1107,7 @@ Also answer:
 
 ---
 
-# 27. EVIDENCE REQUIREMENT
+# 26. EVIDENCE REQUIREMENT
 
 - [x] **FOLLOWED** - Implementation references external/ submodules and verified capabilities
 
@@ -1140,3 +1129,34 @@ Distinguish:
 * [ ] Unknown - Not yet documented
 
 The final report should be useful as the technical foundation for a future software-development ROADMAP.
+
+---
+
+# 27. COLLABORATION AND VERSION CONTROL
+
+- OPTIONAL / DEFERRED - Collaboration is deliberately scheduled last. The
+  priority is a working single-user design pipeline (prompt -> validated
+  circuit -> manufacturable KiCad project) before any multi-user feature.
+  Nothing here is a prerequisite for the rest of the roadmap.
+
+- [ ] **PENDING** - Not yet implemented
+
+Flux has a collaborative browser workflow.
+
+Research open-source technologies for:
+
+* [ ] real-time collaboration
+* [ ] CRDT
+* [ ] operational transformation
+* [ ] project history
+* [ ] snapshots
+* [ ] comments
+* [ ] permissions
+* [ ] Git integration
+
+Investigate whether a KiCad project can reasonably be version-controlled using Git.
+
+Determine how multiple users could safely edit the same design.
+
+---
+

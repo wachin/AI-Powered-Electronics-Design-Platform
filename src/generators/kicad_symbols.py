@@ -18,6 +18,11 @@ Pin-space vs sheet-space: KiCad symbol libraries use a Y-up axis, while
 schematics use Y-down. The caller flips the Y sign; `pin_endpoints()` does that
 for convenience.
 
+Licensing: the KiCad symbol libraries are CC-BY-SA-4.0 with an exception that
+permits generated designs to be used freely. They are read from the local KiCad
+installation at runtime and are NOT vendored into this repository. See
+CREDITS.md.
+
 Verified against KiCad 9.0.2 (`/usr/share/kicad/symbols`).
 """
 

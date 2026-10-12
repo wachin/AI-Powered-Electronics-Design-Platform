@@ -220,6 +220,10 @@ records the verified state of each artifact.
 
 ### Schematic — VERIFIED
 
+*(Schematic and PCB are both verified as of 2026-10; see the PCB section
+below and `CREDITS.md` for the KiCad library licensing that makes embedding
+pad and symbol data permissible.)*
+
 The schematic generator previously emitted only `(symbol (lib_id ...))` blocks:
 no `lib_symbols` definitions, no `(pin ...)` instances and no wires or labels.
 KiCad would open the file but `kicad-cli sch export netlist` returned
@@ -254,21 +258,41 @@ Notes learned while implementing this, which cost real debugging time:
 * Symbol libraries use a Y-up axis while schematics use Y-down; the Y sign must
   be flipped when converting a pin position to a sheet coordinate.
 
-### PCB — NOT YET USABLE
+### PCB — VERIFIED (unrouted)
 
-`generate_pcb()` still does not produce a loadable board:
+`generate_pcb()` previously emitted footprints with no pads and wrote track
+endpoints as designator references (`(start D1.2)`), where KiCad requires
+coordinates; `kicad-cli pcb drc` reported "Failed to load board".
 
-* footprints carry no `(pad ...)` elements, so there is nothing to route or
-  fabricate;
-* track segments are emitted as `(start D1.2)` — designator references where
-  KiCad requires coordinates;
-* `kicad-cli pcb drc` reports "Failed to load board".
+It now emits, for every component:
 
-Consequently the Gerber/DRC/auto-routing claims for *generated* designs should
-be treated as unverified until the PCB generator is rewritten to emit real pads
-(most reliably by copying pad definitions from
-`/usr/share/kicad/footprints/*.pretty/*.kicad_mod`, which also guarantees pad
-numbers match the pins used by the netlist).
+* a real footprint copied from the installed KiCad footprint libraries
+  (`src/generators/kicad_footprints.py`), with its pads, courtyards and silkscreen;
+* a net assigned to each pad, matched by pad number, plus board-level net
+  declarations;
+* a rectangular board outline on `Edge.Cuts`.
+
+Using the real pad definitions is what makes net assignment meaningful: pad
+numbers come from the same library the netlist uses, so they line up.
+
+Verified with `kicad-cli` (KiCad 9.0.2) by `tests/test_kicad_pcb.py`:
+
+* the board loads (a DRC report is produced);
+* DRC reports **0 unconnected pads, 0 shorts, 0 crossing tracks** on an
+  unrouted board — the pads are correctly netted;
+* Gerber and drill files export successfully, so the board is manufacturable.
+
+Naive straight-line stub routing is available but **off by default**
+(`KiCadGenerator(circuit, route_pcb=True)`), because stubs between pads on the
+same net cross other nets and short them. Real routing belongs to FreeRouting.
+
+### Auto-routing — BLOCKED by upstream
+
+FreeRouting consumes Specctra DSN, and `kicad-cli pcb export dsn` was **removed
+in KiCad 7** (verified: `kicad-cli pcb export` on KiCad 9.0.2 lists no DSN
+subcommand). `src/routing/freerouting.py` already detects this and returns an
+explicit error rather than failing silently. Options are KiCad 6 in parallel, an
+external DSN converter, or `pcbnew` Python scripting.
 
 ### How to re-verify
 
@@ -276,7 +300,7 @@ numbers match the pins used by the netlist).
 python tools_check_netlist.py                 # schematic -> netlist, with kicad-cli
 python tools_e2e_check.py --provider mock     # full pipeline, offline
 python tools_e2e_check.py --provider ollama --model qwen2.5:3b --timeout 900
-pytest tests/test_kicad_netlist.py -v         # includes the kicad-cli acceptance test
+pytest tests/test_kicad_netlist.py tests/test_kicad_pcb.py -v
 ```
 
 ---

@@ -160,3 +160,38 @@ USERS SHOULD CONDUCT THEIR OWN PATENT AND LICENSE ANALYSIS.
 - `LEGAL_DISCLAIMER.md` - General legal guidance
 - `research/flux-ai-patent-search.md` - Patent search instructions
 - `LICENSE` - Project license (GPL-3.0)
+
+---
+
+## Third-Party Libraries and the KiCad Library Exception
+
+This project generates KiCad schematics and PCBs by reading the **locally
+installed KiCad symbol and footprint libraries** at runtime. Those libraries are
+licensed **CC-BY-SA-4.0 with an exception**, and the exception is what allows
+generated designs to be used freely.
+
+The exception (from the KiCad libraries' own license notice) reads:
+
+> "To the extent that the creation of electronic designs that use 'Licensed
+> Material' can be considered to be 'Adapted Material', then the copyright
+> holder waives article 3 of the license with respect to these designs and any
+> generated files which use data provided as part of the 'Licensed Material'."
+
+Practical consequences:
+
+* Electronic designs produced with this tool — schematics, PCB files, Gerbers,
+  drill files and other fabrication output — are **not** subjected to a
+  share-alike obligation by the use of KiCad library data.
+* The KiCad library files themselves remain CC-BY-SA-4.0. This project does not
+  redistribute them; they are read from the user's own KiCad installation.
+* A working KiCad installation is therefore required for schematic and PCB
+  generation. Where the libraries are unavailable, the generators report the
+  affected components and emit incomplete output rather than silently producing
+  files KiCad cannot use.
+
+`kicad-cli` (GPL-3.0-or-later) is invoked strictly as an external subprocess for
+netlist export, ERC, DRC and Gerber/drill export; no KiCad source is copied,
+linked or modified.
+
+See `CREDITS.md` for the full dependency and license inventory.
+
