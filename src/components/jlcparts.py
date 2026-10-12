@@ -1011,6 +1011,34 @@ class JLCPartsDatabase:
             return []
         return [self._row_to_part(row) for row in rows]
 
+    def lookup_mpn_prefix(self, prefix: str, limit: int = 40) -> List[JLCPart]:
+        """
+        Catalogue entries whose part number starts with this prefix, best stock
+        first.
+
+        Used to find a figure published for a *sibling* of a part. Datasheet
+        summaries differ between manufacturers of the same part number, and they
+        also differ between variants: ``AMS1117-3.3`` states a 150 °C junction
+        limit while ``AMS1117-3.3OE`` states nothing usable. Reading the family is
+        better than declaring the figure unknown.
+        """
+        if not self.available or len(prefix) < 4:
+            return []
+        escaped = prefix.replace("%", "\\%").replace("_", "\\_")
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM jlc_components "
+                    "WHERE mfr LIKE ? ESCAPE '\\' COLLATE NOCASE "
+                    "ORDER BY preferred DESC, stock DESC LIMIT ?",
+                    (f"{escaped}%", int(limit)),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            logger.warning("Catalog prefix lookup failed for %r: %s", prefix, exc)
+            return []
+        return [self._row_to_part(row) for row in rows]
+
     def search_explained(
         self,
         query: str = "",

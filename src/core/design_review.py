@@ -34,9 +34,9 @@ returns a verdict when the physics is unambiguous either way.
 
 from __future__ import annotations
 
-import re
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.components.parameters import parse_conditional, parse_temperature_range
 
@@ -209,8 +209,19 @@ def forward_voltage_for_colour(colour: str) -> Optional[Tuple[float, float]]:
 # A package cannot beat these, whatever the copper: they are single-digit watts
 # in still air with no heatsink. Used only to make a verdict when the answer does
 # not depend on the unknown.
-_IMPOSSIBLE_THETA_JA = 20.0     # below this, no SMT package manages it
-_TRIVIAL_THETA_JA = 250.0       # above this, any package manages it
+# The thresholds below are heuristics about *package classes*, deliberately not
+# datasheet numbers for a specific part. They exist so the review can give a
+# verdict when the physics does not depend on the unknown:
+#
+#   * nothing small reaches 20 °C/W without a heatsink;
+#   * below about 50 °C/W no ordinary surface-mount package qualifies either —
+#     a package with a soldered thermal tab is the only thing that gets close,
+#     and a bare SOT-23 is far worse. A design that needs better than this is
+#     reported as a problem, because "check theta_JA" would be answered "no".
+#   * above 250 °C/W every package manages it.
+_IMPOSSIBLE_THETA_JA = 20.0
+_IMPLAUSIBLE_THETA_JA = 50.0
+_TRIVIAL_THETA_JA = 250.0
 
 
 def review_linear_regulator_thermal(
@@ -312,6 +323,39 @@ def review_linear_regulator_thermal(
                 f"Staying under a {tj_max:g} °C junction at {ambient_c:g} °C ambient "
                 f"needs a thermal path better than {required_theta_ja:.0f} °C/W, "
                 f"which no package achieves without a heatsink. Reduce the input "
+                f"voltage, reduce the current, or use a switching regulator."
+            ),
+            detail=detail,
+        )
+
+    if required_theta_ja < _IMPLAUSIBLE_THETA_JA:
+        # The junction passes its limit at the stated ambient for any thermal path
+        # a surface-mount package provides. That is a design problem, not a
+        # missing figure, and the arithmetic is shown so it can be checked.
+        ambient_at_50 = tj_max - dissipation * _IMPLAUSIBLE_THETA_JA
+        if ambient_at_50 <= 0:
+            # A negative ambient is the arithmetic talking, not a temperature
+            # anyone works at: it means the limit is exceeded even in a freezer.
+            worst_case = (
+                "at 50 °C/W, already better than most surface-mount packages, the "
+                "junction would exceed its limit even at 0 °C ambient"
+            )
+        else:
+            worst_case = (
+                f"at 50 °C/W, already better than most, the junction reaches its "
+                f"limit at just {ambient_at_50:.0f} °C ambient"
+            )
+        detail["limit_used_c"] = tj_max
+        return Finding(
+            rule_id="REVIEW_THERMAL",
+            severity=FAIL,
+            subject=subject,
+            message=(
+                f"Dissipates {dissipation:.2f} W ({drop:.2f} V at {iout:g} A). "
+                f"Staying under a {tj_max:g} °C junction at {ambient_c:g} °C ambient "
+                f"would need a thermal path better than {required_theta_ja:.0f} °C/W, "
+                f"and no ordinary surface-mount package achieves that without a "
+                f"thermal pad or a heatsink — {worst_case}. Reduce the input "
                 f"voltage, reduce the current, or use a switching regulator."
             ),
             detail=detail,
@@ -781,6 +825,73 @@ def _net_voltage(circuit: Any, net_name: Optional[str]) -> Optional[float]:
     return None
 
 
+def _junction_limit_from_siblings(
+    db: Any, mpn: str, exclude: Optional[str] = None
+) -> Tuple[Optional[float], str]:
+    """
+    A junction temperature limit published for the same part number.
+
+    The catalogue holds one row per manufacturer, and their datasheet summaries
+    differ: one AMS1117 row says ``0℃~+150℃@(Tj)`` while another says
+    ``-50℃~+140℃`` with no junction qualifier. Refusing the check because the
+    first row is silent would hide a real thermal problem behind missing data.
+
+    Returns ``(limit, description)``, or ``(None, "")`` when no row states one.
+    Only an explicit ``@(Tj)`` range is accepted: an ambient range is a different
+    limit and using it as a junction limit would understate the problem.
+    """
+    if db is None or not mpn:
+        return (None, "")
+
+    finder = getattr(db, "find_in_catalog", None)
+    if finder is None:
+        return (None, "")
+
+    try:
+        entries = finder(mpn) or []
+    except Exception:  # pragma: no cover - defensive against DB quirks
+        return (None, "")
+
+    best, source = _best_junction_limit(entries, exclude)
+    if best is not None:
+        return (best, source)
+
+    # Nothing for this exact part number. Variants of the same family often
+    # publish it — the design asked for "AMS1117-3.3OE" and only "AMS1117-3.3"
+    # states a junction limit — so the family is consulted and named.
+    family = getattr(db, "find_family_in_catalog", None)
+    if family is None:
+        return (None, "")
+    try:
+        relatives = family(mpn) or []
+    except Exception:  # pragma: no cover - defensive against DB quirks
+        return (None, "")
+    return _best_junction_limit(relatives, exclude, family_of=mpn)
+
+
+def _best_junction_limit(
+    entries: Any, exclude: Optional[str], family_of: str = ""
+) -> Tuple[Optional[float], str]:
+    """The lowest published junction limit among a set of catalogue entries."""
+    best: Optional[float] = None
+    source = ""
+    for entry in entries:
+        if exclude and getattr(entry, "lcsc_part", None) == exclude:
+            continue
+        attributes = _attributes(entry)
+        parsed = parse_temperature_range(attributes.get("temperature_range"))
+        if parsed is None or not parsed.is_junction or parsed.maximum is None:
+            continue
+        # The lowest published limit is the safe one to design against.
+        if best is None or parsed.maximum < best:
+            best = parsed.maximum
+            label = f"{getattr(entry, 'lcsc_part', '?')} {getattr(entry, 'mpn', '')}".strip()
+            if family_of and getattr(entry, "mpn", "") != family_of:
+                label += f", in the same family as {family_of}"
+            source = label
+    return (best, source)
+
+
 def _spec_for(db: Any, mpn: str) -> Any:
     """The catalogue entry for a part, or None."""
     if db is None or not mpn:
@@ -814,7 +925,7 @@ def _has_ratings(attributes: Dict[str, Any]) -> bool:
 
 def _review_attributes(
     db: Any, component: Any, spec: Any
-) -> Tuple[Dict[str, Any], Optional[str]]:
+) -> Tuple[Dict[str, Any], Optional[str], str]:
     """
     The ratings to review a component against, and where they came from.
 
@@ -826,14 +937,15 @@ def _review_attributes(
     "unknown" for a design that could have been checked.
     """
     attributes = _attributes(spec)
+    resolved_mpn = str(getattr(spec, "mpn", "") or "")
     if _has_ratings(attributes) or db is None:
-        return attributes, None
+        return attributes, None, resolved_mpn
 
     value = str(getattr(component, "value", "") or "")
     package = str(getattr(component, "package", "") or "")
     kind = getattr(getattr(component, "component_type", None), "value", "")
     if not value:
-        return attributes, None
+        return attributes, None, resolved_mpn
 
     try:
         candidates = db.search(
@@ -843,19 +955,21 @@ def _review_attributes(
             limit=3,
         )
     except Exception:  # pragma: no cover - defensive against DB quirks
-        return attributes, None
+        return attributes, None, resolved_mpn
 
     for candidate in candidates:
         if not getattr(candidate, "lcsc_part", None):
             continue
         candidate_attributes = _attributes(candidate)
         if _has_ratings(candidate_attributes):
-            return candidate_attributes, (
+            return (
+                candidate_attributes,
                 f"{candidate.lcsc_part} {candidate.mpn} "
                 f"({candidate.package}) - the catalog part this value and package "
-                f"resolves to"
+                f"resolves to",
+                str(candidate.mpn or ""),
             )
-    return attributes, None
+    return attributes, None, resolved_mpn
 
 
 def _value_number(text: Any) -> Optional[float]:
@@ -897,7 +1011,7 @@ def review_circuit(
     for component in circuit.components.values():
         kind = getattr(getattr(component, "component_type", None), "value", "")
         spec = _spec_for(db, component.mpn or "")
-        attributes, source = _review_attributes(db, component, spec)
+        attributes, source, rating_mpn = _review_attributes(db, component, spec)
         if source:
             review.assumptions.append(
                 f"{component.ref}: ratings taken from {source}."
@@ -909,6 +1023,22 @@ def review_circuit(
             tj_max = None
             if temperature is not None and temperature.is_junction:
                 tj_max = temperature.maximum
+            else:
+                # The catalogue lists the same part number several times, once per
+                # manufacturer, and they do not all publish the same figures. A
+                # sibling entry that states the junction limit is real data, so it
+                # is used rather than declaring the check impossible.
+                tj_max, limit_source = _junction_limit_from_siblings(
+                    db,
+                    rating_mpn or component.mpn or "",
+                    exclude=getattr(spec, "lcsc_part", None),
+                )
+                if tj_max is not None:
+                    review.assumptions.append(
+                        f"{component.ref}: the rated part does not state a junction "
+                        f"temperature limit; used {tj_max:g} °C from "
+                        f"{limit_source}, a catalogue entry for the same part number."
+                    )
             review.findings.append(
                 review_linear_regulator_thermal(
                     label,

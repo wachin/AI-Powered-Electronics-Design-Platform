@@ -73,6 +73,10 @@ class DesignSummary:
     # The computed electrical review: dissipation, dropout, voltage stress, LED
     # operating point. Replaces the generic "check thermal dissipation" notes.
     design_review: Optional[Any] = None
+    # What the requirement parser read from the prompt, and — in `assumptions` —
+    # what it filled in instead. A guessed input voltage decides whether the
+    # finished design works, so it is reported rather than buried.
+    requirements: Dict[str, Any] = field(default_factory=dict)
     # Provenance: whether the design came from an LLM or the deterministic
     # template generator, and any substitution/inference notes.
     used_llm: bool = True
@@ -89,6 +93,7 @@ class DesignSummary:
             "generated_files": {k: str(v) for k, v in self.generated_files.items()},
             "bom": self.bom,
             "design_review": self.design_review.to_dict() if self.design_review else None,
+            "requirements": self.requirements,
             "total_cost": round(
                 sum(item.get("total_price", 0.0) or 0.0 for item in self.bom), 4
             ),
@@ -154,6 +159,10 @@ class AIDesignOrchestrator:
             component_db=self.db,
             allow_fallback=allow_fallback,
             max_repairs=max_repairs,
+            # "mock" means no model: parse the prompt with rules rather than
+            # taking the mock client's canned requirements, which discarded
+            # whatever the user typed.
+            deterministic=llm_provider == "mock",
         )
         self.nl_pipeline.set_orchestrator(self)
 
@@ -175,6 +184,19 @@ class AIDesignOrchestrator:
         circuit_ir = result.get("circuit_ir")
         requirements = result.get("requirements", {})
         specification = result.get("specification", {})
+
+        # A plain-dict view of the parsed requirements, for the summary and for
+        # anyone reading design_summary.json.
+        parsed_requirements = {
+            "circuit_type": getattr(requirements, "circuit_type", ""),
+            "input_voltage": getattr(requirements, "input_voltage", None),
+            "output_voltage": getattr(requirements, "output_voltage", None),
+            "output_current": getattr(requirements, "output_current", None),
+            "features": list(getattr(requirements, "features", []) or []),
+            "assumptions": list(
+                (getattr(requirements, "constraints", {}) or {}).get("assumptions", [])
+            ),
+        }
         print(f"   ✅ Circuit IR created: {len(circuit_ir.components)} components, {len(circuit_ir.nets)} nets")
 
         # Step 2: Validate circuit with ERC
@@ -320,6 +342,7 @@ class AIDesignOrchestrator:
             bom=bom,
             purchase_list=purchase_list,
             design_review=design_review,
+            requirements=parsed_requirements,
             used_llm=getattr(specification, "used_llm", True),
             topology=getattr(specification, "topology", "") or "",
             design_notes=list(getattr(specification, "warnings", []) or []),

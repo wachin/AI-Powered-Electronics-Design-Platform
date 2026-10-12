@@ -144,8 +144,25 @@ class CircuitSpecification:
 class RequirementParser:
     """Parses natural language requirements into structured CircuitRequirement."""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, deterministic: bool = False):
+        """
+        Args:
+            llm_client: The model to ask when ``deterministic`` is False.
+            deterministic: Parse the prompt with rules instead of asking a model.
+
+                This exists because the mock client returns *canned* requirements
+                (5 V in, 3.3 V out, 0.5 A) rather than reading the prompt — so
+                running the CLI with its default ``--provider mock`` discarded
+                whatever the user typed. "Design a 12V to 3.3V LDO" produced a
+                5 V design, and every later stage — the electrical review, the
+                trace widths, the purchase list — validated that wrong design
+                without saying so.
+
+                The rule-based parser reads the prompt for real, so the default
+                path now honours it.
+        """
         self.llm = llm_client
+        self.deterministic = deterministic
 
     # JSON Schema for requirement parsing
     REQUIREMENT_SCHEMA = {
@@ -231,6 +248,9 @@ class RequirementParser:
 
     async def parse(self, natural_language: str) -> CircuitRequirement:
         """Parse natural language into structured circuit requirements."""
+        if self.deterministic:
+            return self._fallback_parse(natural_language)
+
         # Build few-shot examples
         examples_text = "\n\n".join([
             f"Input: {ex['input']}\nOutput: {json.dumps(ex['output'])}"
@@ -293,17 +313,36 @@ class RequirementParser:
         text_lower = text.lower()
 
         circuit_type = "generic"
-        if any(k in text_lower for k in ["ldo", "linear regulator"]):
-            circuit_type = "ldo_regulator"
-        elif "buck" in text_lower or "step-down" in text_lower or "step down" in text_lower:
+        # Switching topologies are checked before the linear ones, because
+        # "regulador conmutado" and "regulador lineal" both contain "regulador".
+        # Spanish terms are listed alongside the English ones: this project is
+        # used in both, and "un regulador de 12V a 3.3V" was being classified as
+        # "generic" while the voltages were read correctly — a design that
+        # silently ignores the topology the user asked for.
+        switching_down = (
+            "buck", "step-down", "step down", "reductor",
+            # A switching regulator with no direction named is taken as a buck:
+            # step-down is what the overwhelming majority of them are, and
+            # "generic" would silently ignore the topology.
+            "conmutado", "switching", "conmutada",
+        )
+        switching_up = ("boost", "step-up", "step up", "elevador")
+
+        if any(k in text_lower for k in switching_down):
             circuit_type = "buck_converter"
-        elif "boost" in text_lower or "step-up" in text_lower or "step up" in text_lower:
+        elif any(k in text_lower for k in switching_up):
             circuit_type = "boost_converter"
+        elif any(k in text_lower for k in ["ldo", "linear regulator", "regulador lineal", "lineal"]):
+            circuit_type = "ldo_regulator"
+        elif any(k in text_lower for k in ["regulador", "regulator"]):
+            # A regulator with no topology named is usually a linear one; the
+            # switching branches above have already taken the exceptions.
+            circuit_type = "ldo_regulator"
         elif "phono" in text_lower or "riaa" in text_lower:
             circuit_type = "phono_preamp"
         elif "led" in text_lower:
             # Any mention of an LED (with a resistor, "driver", "indicator")
-            # is an LED circuit; the LDO/regulator branches above win when the
+            # is an LED circuit; the regulator branches above win when the
             # prompt also asks for a regulator.
             circuit_type = "led_driver"
 
@@ -316,20 +355,46 @@ class RequirementParser:
             except (TypeError, ValueError):
                 return None
 
-        # "5V to 3.3V" / "5v->3.3v" / "5 V → 3.3 V" style ranges.
+        # "5V to 3.3V", "5v->3.3v", "5 V → 3.3 V", "12V a 3.3V", "de 12V a 3.3V".
+        # The separator list includes the Spanish "a" because this project is used
+        # in Spanish as much as in English, and "12V a 3.3V" is unambiguous.
+        # `\ba\b` cannot match the "a" inside "at" or "and", because neither has a
+        # word boundary after it.
         span = re.search(
-            r"(\d+(?:\.\d+)?)\s*v\s*(?:to|->|→|-)\s*(\d+(?:\.\d+)?)\s*v?",
+            r"(\d+(?:\.\d+)?)\s*v\s*(?:to|->|→|hasta|\ba\b|-)\s*"
+            r"(\d+(?:\.\d+)?)\s*v?",
             text,
             re.IGNORECASE,
         )
         v_in: Optional[float] = None
         v_out: Optional[float] = None
+        assumptions: List[str] = []
         if span:
             v_in = float(span.group(1))
             v_out = float(span.group(2))
         else:
             v_in = _number(r"(\d+(?:\.\d+)?)\s*v\s*(?:in|input)")
             v_out = _number(r"(\d+(?:\.\d+)?)\s*v\s*(?:out|output)")
+
+            # A single voltage with no range: for a regulator it is the output,
+            # for an LED circuit it is the supply. Said out loud, because a
+            # guessed rail is the difference between a design that works and one
+            # that does not.
+            if v_out is None and v_in is None:
+                single = _number(r"(\d+(?:\.\d+)?)\s*v\b")
+                if single is not None:
+                    if circuit_type in ("ldo_regulator", "buck_converter", "boost_converter"):
+                        v_out = single
+                        assumptions.append(
+                            f"only one voltage was stated ({single:g} V); treated as "
+                            f"the output, with the input left to the default"
+                        )
+                    elif circuit_type == "led_driver":
+                        v_in = single
+                        assumptions.append(
+                            f"only one voltage was stated ({single:g} V); treated as "
+                            f"the supply for the LED circuit"
+                        )
 
         # "500mA", "3A", "1.5 A"
         current = _number(r"(\d+(?:\.\d+)?)\s*(?:a|amp|amps|ampere|amperes)\b")
@@ -343,6 +408,23 @@ class RequirementParser:
         if any(k in text_lower for k in ["decoupling", "bypass", "filter"]):
             features.append("decoupling")
 
+        # The defaults the specification generator applies. Filling them here
+        # means the caller is told what was assumed instead of discovering it in
+        # the finished design.
+        if circuit_type in ("ldo_regulator", "buck_converter", "boost_converter"):
+            if v_in is None:
+                v_in = 5.0
+                assumptions.append("no input voltage was stated; assumed 5 V")
+            if v_out is None:
+                default_out = 3.3 if circuit_type == "ldo_regulator" else 5.0
+                v_out = default_out
+                assumptions.append(
+                    f"no output voltage was stated; assumed {default_out:g} V"
+                )
+            if current is None:
+                current = 0.5
+                assumptions.append("no current was stated; assumed 0.5 A")
+
         return CircuitRequirement(
             circuit_type=circuit_type,
             description=text.strip(),
@@ -350,6 +432,7 @@ class RequirementParser:
             output_voltage=v_out,
             output_current=current,
             features=features,
+            constraints={"assumptions": assumptions} if assumptions else {},
         )
 
 
@@ -365,6 +448,9 @@ class CircuitSpecificationGenerator:
     ):
         self.llm = llm_client
         self.db = component_db
+        # `use_llm=False` selects the rule-based generator outright. It is what
+        # the deterministic path sets, so that a run with no model never asks a
+        # mock one for a canned answer.
         self.use_llm = use_llm
         # When False, an LLM failure raises instead of silently producing a
         # canned template. Callers that must not fake a design set this False.
@@ -1265,6 +1351,7 @@ class NLToCircuitPipeline:
         component_db: Optional[Any] = None,
         allow_fallback: bool = True,
         max_repairs: int = 2,
+        deterministic: bool = False,
     ):
         """Initialize pipeline with optional LLM client and component database.
 
@@ -1276,6 +1363,10 @@ class NLToCircuitPipeline:
                 silently substituting the rule-based template generator.
             max_repairs: How many times a physically invalid design is sent back
                 to the model with specific error feedback.
+            deterministic: Parse and generate with rules instead of asking the
+                model. The mock client returns canned requirements rather than
+                reading the prompt, so without this a default run discards what
+                the user typed; see :class:`RequirementParser`.
         """
         if llm_client is None:
             llm_client = create_llm_client("mock")
@@ -1283,11 +1374,14 @@ class NLToCircuitPipeline:
         self.llm_client = llm_client
         self.max_repairs = max_repairs
         self.allow_fallback = allow_fallback
+        self.deterministic = deterministic
         self.db = component_db if component_db is not None else ComponentDatabase()
 
-        self.parser = RequirementParser(llm_client)
+        self.parser = RequirementParser(llm_client, deterministic=deterministic)
         self.spec_generator = CircuitSpecificationGenerator(
-            llm_client, self.db, allow_fallback=allow_fallback
+            llm_client, self.db,
+            use_llm=not deterministic,
+            allow_fallback=allow_fallback,
         )
         self.builder = CircuitIRBuilder(self.db)
         self.validator = DesignValidator(self.db)
@@ -1459,10 +1553,17 @@ def create_nl_pipeline(
             raise ValueError(f"Unknown provider: {llm_provider}")
         llm_client = create_llm_client(provider)
     else:
+        provider = llm_provider
         llm_client = create_llm_client(llm_provider)
+
+    # "mock" means *no model*: parse the prompt with rules and generate the
+    # design from the templates. It is not a stub that returns a canned answer
+    # while pretending to read the prompt.
+    deterministic = provider == LLMProvider.MOCK
 
     return NLToCircuitPipeline(
         llm_client=llm_client,
+        deterministic=deterministic,
         component_db=component_db,
         allow_fallback=allow_fallback,
         max_repairs=max_repairs,

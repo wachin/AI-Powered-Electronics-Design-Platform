@@ -644,6 +644,28 @@ class ComponentDatabase:
                 return part
         return None
 
+    def find_family_in_catalog(self, mpn: str, limit: int = 40) -> List[ComponentSpec]:
+        """
+        Catalogue entries in the same part family, best stock first.
+
+        The family is the part number with a trailing variant suffix removed: the
+        letters after the last digit, so ``AMS1117-3.3OE`` becomes ``AMS1117-3.3``
+        and ``TLV1117LV33DCYR`` becomes ``TLV1117LV33``. A sibling often publishes a
+        figure the variant does not.
+        """
+        if not self.using_jlcparts:
+            return []
+        import re as _re
+
+        prefix = _re.sub(r"(?<=[0-9])[A-Z]+$", "", mpn.strip())
+        if prefix == mpn.strip():
+            # Nothing to strip, so the exact lookup has already covered it.
+            return []
+        return [
+            self._jlcpart_to_spec(part)
+            for part in self._jlcparts_db.lookup_mpn_prefix(prefix, limit=limit)
+        ]
+
     def find_in_catalog(self, mpn: str) -> List[ComponentSpec]:
         """
         Every catalogue entry with this exact MPN, best stock first.

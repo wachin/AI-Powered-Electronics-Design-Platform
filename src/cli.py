@@ -328,9 +328,10 @@ Examples:
         default="mock",
         choices=["mock", "ollama", "openai", "anthropic"],
         help=(
-            "LLM provider. 'mock' uses the deterministic rule-based generator; "
-            "'ollama' uses a local model; 'openai' covers any OpenAI-compatible "
-            "endpoint via --base-url."
+            "LLM provider. 'mock' (the default) uses no model at all: your prompt "
+            "is parsed with rules and the design comes from the built-in "
+            "templates. 'ollama' uses a local model; 'openai' covers any "
+            "OpenAI-compatible endpoint via --base-url."
         ),
     )
     parser.add_argument(
@@ -432,6 +433,8 @@ async def _run(args: argparse.Namespace) -> int:
         max_repairs=args.max_repairs,
     )
 
+    provider_is_mock = args.provider == "mock"
+
     request = DesignRequest(
         prompt=args.prompt,
         project_name=args.project_name,
@@ -448,13 +451,24 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"  Topology: {summary.topology or 'n/a'}")
     if summary.used_llm:
         print("  Source:   LLM-generated specification")
+    elif provider_is_mock:
+        print(
+            "  Source:   rule-based (no model configured; your prompt was parsed "
+            "with rules)"
+        )
     else:
         print(
             "  Source:   ⚠️  rule-based template "
-            "(the LLM was unavailable and fallback was allowed)"
+            "(the model was unavailable and fallback was allowed)"
         )
     for note in summary.design_notes[:6]:
         print(f"  Note:     {note}")
+
+    # What the parser filled in rather than read. A guessed rail decides whether
+    # the design works, so it is stated rather than left in the finished design.
+    assumptions = (summary.requirements or {}).get("assumptions") or []
+    for assumption in assumptions:
+        print(f"  Assumed:  {assumption}")
 
     print("\n🔍 ERC Report Summary:")
     print(f"  Status: {'✅ PASSED' if summary.erc_report.passed else '❌ FAILED'}")
@@ -470,6 +484,10 @@ async def _run(args: argparse.Namespace) -> int:
         )
         for finding in review.sorted_findings():
             print(f"  {finding.render()}")
+        # Where the ratings came from, and what was assumed to get them. Without
+        # this the reader cannot tell which part was checked.
+        for assumption in review.assumptions:
+            print(f"  · {assumption}")
         if review.failures:
             print(
                 "  Build this only after fixing the failures above: they are "

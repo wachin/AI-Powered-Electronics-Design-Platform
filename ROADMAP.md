@@ -575,6 +575,41 @@ Find open-source projects that could help.
 
 ---
 
+- [x] **FIXED** - **The default path ignored the prompt.** `--provider mock` is
+  the CLI default, and the mock client returned *canned* requirements (5 V in,
+  3.3 V out, 0.5 A) rather than reading what the user typed. So
+  ``-p "Design a 12V to 3.3V LDO regulator"`` produced a 5 V design, and the
+  electrical review, the net classes and the purchase list all validated that
+  wrong design without saying so — the failure mode this project keeps finding:
+  a confident answer to a question nobody asked. The CLI also reported "the LLM
+  was unavailable", which was false: no model was configured.
+- [x] **IMPLEMENTED** - ``RequirementParser(deterministic=True)`` and
+  ``NLToCircuitPipeline(deterministic=True)``: with ``--provider mock`` the prompt
+  is parsed with rules and the design is generated from the templates. The mock
+  client remains for tests, which set explicit responses.
+- [x] **IMPLEMENTED** - The parser reads what people actually write: ranges with
+  ``to``/``->``/``→``/``-``/`a` (Spanish "12V a 3.3V"), ``input``/``output``
+  labels, ``mA`` and ``A``, and **Spanish topology words** (``regulador``,
+  ``conmutado``, ``reductor``, ``elevador``, ``lineal``). A single voltage with no
+  range is taken as the output for a regulator and as the supply for an LED
+  circuit.
+- [x] **IMPLEMENTED** - Every filled-in default is **reported**: the CLI prints
+  ``Assumed: no input voltage was stated; assumed 5 V``, and the assumptions are
+  in ``design_summary.json``. A guessed rail decides whether the design works, so
+  it is stated rather than buried.
+- [x] **VERIFIED** - With the prompt honoured, the review catches the real
+  problem: 12 V to 3.3 V at 0.5 A dissipates 4.4 W and needs a thermal path
+  better than about 23 °C/W, which no surface-mount package provides — where the
+  5 V design it used to produce needed only 144 °C/W and passed. ``C1`` also now
+  sees 12 V instead of 5 V.
+- [x] **IMPLEMENTED** - A missing junction temperature limit is looked up in the
+  **same part family**: the catalogue lists one row per manufacturer and per
+  variant, and ``AMS1117-3.3`` states ``150 °C @(Tj)`` where ``AMS1117-3.3OE``
+  states nothing usable. The review uses the lowest published limit and says which
+  part it came from, rather than declaring the check impossible.
+
+---
+
 # 9. CIRCUIT VALIDATION
 
 - [x] **IMPLEMENTED** - ERC engine in src/core/erc.py with 6 validation rules + unit tests

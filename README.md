@@ -95,7 +95,9 @@ This project builds an AI-powered electronics design platform that transforms na
   permission system, the process sandbox, and the free-form MCP agent. They have
   tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
 - ⚠️ The requirement parser fills defaults for unspecified values instead of
-  asking the user.
+  asking the user. It now **says what it assumed** (`Assumed: no input voltage
+  was stated; assumed 5 V`) instead of leaving it in the finished design, but it
+  still does not ask.
 - ⚠️ A working KiCad installation is required: symbol and footprint libraries
   are read at runtime (see `CREDITS.md` for licensing).
 
@@ -261,6 +263,7 @@ program can use. Two details make the contract work in practice:
 | Repair loop | Sends the specific errors back to the model and retries, keeping the best attempt | One bad answer ends the run |
 | Emit | Deterministic S-expression writers for schematic and PCB | Files KiCad cannot open or netlist |
 | Net classes | Power and ground nets get a width sized for their current | A 1 A rail routed at 0.2 mm — about 0.74 A of copper |
+| Prompt parsing | The input voltage, current and topology you type are used | A 12 V request silently designed as 5 V |
 | Electrical review | Computes dissipation, dropout, voltage stress and the LED operating point | A design that heats itself past its limit, or cannot regulate |
 
 ---
@@ -585,6 +588,11 @@ Design options relevant to ordering:
   --boards N                How many boards you are building (default 1)
   --spares FRACTION         Extra parts allowance, e.g. 0.1 for 10%
   --ambient C               Ambient temperature for the thermal budget (default 25)
+
+The default provider is `mock`, which means **no model at all**: your prompt is
+parsed with rules and the design comes from the built-in templates. It reads your
+prompt — write `"12V to 3.3V LDO at 2A"` and you get those numbers, not a canned
+answer.
   mcp-status                Show optional MCP server availability
   mcp-setup [--server X]    Create isolated environments for MCP servers
 ```
