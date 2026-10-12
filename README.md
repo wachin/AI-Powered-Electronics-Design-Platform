@@ -8,7 +8,7 @@
 -->
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-224%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-239%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -861,6 +861,99 @@ git clone --depth 1 https://github.com/devbisme/skidl /tmp/refs/skidl
 
 The full list with licences is in
 [`research/reference-repositories.md`](research/reference-repositories.md).
+
+---
+
+## Verify Before You Buy Parts
+
+A generated design is only useful if it works. This section is the checklist to
+run **before ordering components**, ordered from "always run this" to "worth
+doing for anything you care about".
+
+### The 60-second check
+
+```bash
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED" \
+    -o ./my_design -n my_ldo
+```
+
+Look at three things in the output:
+
+```
+✅ PASSED - Errors: 0, Warnings: 0          ← electrical rules
+⚡ SPICE Simulation:
+  DC operating point:
+    vu1_in              5.000 V             ← does the input rail match your supply?
+    vu1_out             3.300 V             ← does the output match what you need?
+📊 Bill of Materials (BOM):                 ← real, purchasable part numbers
+```
+
+### Full checklist
+
+| # | Check | Command | Proves |
+|---|---|---|---|
+| 1 | Electrical rules | automatic | No unconnected power pins, no LED without a resistor, no single-pin nets, decoupling present |
+| 2 | Netlist is real | `kicad-cli sch export netlist -o /tmp/n.net ./my_design/*.kicad_sch` | KiCad extracts the same connectivity we intended |
+| 3 | Design rules | `kicad-cli pcb drc -o /tmp/drc.rpt ./my_design/*.kicad_pcb` | Pads, clearances and the board outline are valid |
+| 4 | SPICE operating point | automatic (`--no-spice` to skip) | Node voltages and passive-path currents |
+| 5 | Independent ERC/DRC | `--mcp-validate` (needs `mcp-setup`) | A second implementation agrees with ours |
+| 6 | Manufacturing files | `kicad-cli pcb export gerbers` / `drill` | The board can actually be fabricated |
+| 7 | Visual check | open the `.kicad_sch` / `.kicad_pcb` in KiCad | Nothing looks wrong to your eyes — still the best filter |
+
+Read the numbers at step 4 against your requirements: if you need 3.3 V and it
+says 3.3 V, that rail is consistent. If the design has an LED, check its current
+sits near the datasheet value (typically 2–20 mA).
+
+### What the SPICE check does and does not prove
+
+This matters, because it is easy to over-trust a green tick:
+
+**It does prove:**
+
+* the netlist is complete and solvable — every net has at least two connections;
+* **currents through passive paths are genuinely computed** by ngspice from the
+  component values (for example an LED current of 6.34 mA through a 330 Ω
+  resistor, consistent with the diode model);
+* the circuit is internally consistent.
+
+**It does not prove:**
+
+* **that a regulator actually regulates.** Active parts are modelled as *ideal
+  sources*: an `AMS1117-3.3` becomes a fixed 3.3 V source, so "5 V in, 3.3 V out"
+  is a statement about the netlist, not a simulated result. Dropout, efficiency,
+  thermal behaviour, ripple and stability are **not** simulated.
+* that the chosen part meets its datasheet specifications;
+* that the board is manufacturable and assemblable — for that, use steps 3 and 6.
+
+Treat the operating point as a **connectivity and sanity check**, not as a
+guarantee of performance. For real confidence in an active circuit, simulate the
+vendor SPICE model of the chosen part yourself.
+
+### Verify a single subsystem
+
+```bash
+# Electrical rules only, on the built-in rule set
+pytest tests/test_erc.py -v
+
+# SPICE netlist compilation and ngspice execution
+pytest tests/test_ngspice.py -v
+
+# The full KiCad acceptance gates (need kicad-cli installed)
+pytest tests/test_kicad_netlist.py tests/test_kicad_pcb.py -v
+
+# Everything, treating a missing kicad-cli as a failure
+DSH_REQUIRE_KICAD=1 pytest -q
+```
+
+### If something fails
+
+| Symptom | What it means | What to do |
+|---|---|---|
+| ERC errors | The design is electrically incomplete | Re-run; the repair loop retries automatically. Use `--strict` to see the model's errors instead of a fallback |
+| `ngspice not found` | Simulation unavailable | `sudo apt install ngspice`, or pass `--no-spice` |
+| "SPICE ran but produced no operating point" | The netlist has no DC source | Check the design has a supply |
+| DRC reports missing footprint libraries | KiCad's *global* library table is not populated | Harmless: the board embeds its footprints. Configure KiCad libraries to silence it |
+| DRC reports clearance or short errors | A real board problem | Fix before ordering |
 
 ---
 

@@ -97,3 +97,60 @@ C1 OUT GND 100n
     assert hasattr(result, 'success')
     assert hasattr(result, 'stdout')
     assert hasattr(result, 'stderr')
+
+class TestOperatingPointParsing:
+    """The operating point is the only machine-checkable simulation output."""
+
+    SAMPLE = """
+\tOperating point information:
+\t----\t-------
+\tvu1_out#branch                   -6.34211e-03
+\t     device                   cc2                   cc1
+\t      dc                     3.3                     5
+\t   acmag                       0                       0
+\t     device                vu1_in               vu1_out
+\t      dc                       5                     3.3
+"""
+
+    def test_extracts_dc_node_voltages(self):
+        from src.simulation.ngspice import parse_operating_point
+
+        result = parse_operating_point(self.SAMPLE)
+        assert result["node_voltages"] == {
+            "cc2": 3.3, "cc1": 5.0, "vu1_in": 5.0, "vu1_out": 3.3
+        }
+
+    def test_ignores_branch_currents_and_placeholder_rows(self):
+        from src.simulation.ngspice import parse_operating_point
+
+        result = parse_operating_point(self.SAMPLE)
+        # `vu1_out#branch` must not appear as a voltage.
+        assert not any("#branch" in name for name in result["node_voltages"])
+
+    def test_reports_min_and_max(self):
+        from src.simulation.ngspice import parse_operating_point
+
+        result = parse_operating_point(self.SAMPLE)
+        assert result["min_voltage"] == 3.3
+        assert result["max_voltage"] == 5.0
+
+    def test_empty_output_yields_nothing(self):
+        from src.simulation.ngspice import parse_operating_point
+
+        assert parse_operating_point("") == {}
+        assert parse_operating_point("no tables here") == {}
+
+    def test_result_exposes_voltages_and_flags_missing_results(self):
+        from src.simulation.ngspice import SimulationResult
+
+        empty = SimulationResult(success=True, stdout="", stderr="")
+        assert empty.node_voltages == {}
+        assert empty.has_results is False
+
+        filled = SimulationResult(
+            success=True,
+            stdout="",
+            stderr="",
+            measurements={"node_voltages": {"VOUT": 3.3}},
+        )
+        assert filled.has_results is True

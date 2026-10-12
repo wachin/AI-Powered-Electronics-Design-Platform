@@ -219,6 +219,13 @@ async def _run(args: argparse.Namespace) -> int:
     if summary.spice_result:
         print("\n⚡ SPICE Simulation:")
         print(f"  Status: {'✅ SUCCESS' if summary.spice_result.success else '❌ FAILED'}")
+        voltages = summary.spice_result.node_voltages
+        if voltages:
+            print("  DC operating point (check these before ordering parts):")
+            for net, volts in voltages.items():
+                print(f"    {net:<16} {volts:>8.3f} V")
+        elif summary.spice_result.success:
+            print("  Note: ngspice produced no operating point to report")
         if not summary.spice_result.success and summary.spice_result.error:
             print(f"  Error: {summary.spice_result.error}")
 

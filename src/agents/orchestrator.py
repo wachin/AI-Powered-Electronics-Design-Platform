@@ -78,6 +78,9 @@ class DesignSummary:
         if self.spice_result:
             result["spice_result"] = {
                 "success": self.spice_result.success,
+                "node_voltages": self.spice_result.node_voltages,
+                "measurements": self.spice_result.measurements,
+                "error": self.spice_result.error,
                 "stdout": self.spice_result.stdout[:2000] if self.spice_result.stdout else "",
                 "stderr": self.spice_result.stderr[:2000] if self.spice_result.stderr else "",
             }
@@ -157,10 +160,17 @@ class AIDesignOrchestrator:
         if request.run_spice:
             print("\n⚡ Step 3: Running SPICE simulation (ngspice)...")
             spice_result = simulate_circuit(circuit_ir)
-            if spice_result.success:
-                print(f"   ✅ SPICE simulation completed successfully")
+            if spice_result.success and spice_result.has_results:
+                print("   ✅ SPICE operating point computed:")
+                for net, volts in spice_result.node_voltages.items():
+                    print(f"        {net:<16} {volts:>8.3f} V")
+            elif spice_result.success:
+                print("   ⚠️  SPICE ran but produced no operating point to report")
             else:
-                print(f"   ⚠️  SPICE simulation failed: {spice_result.error or spice_result.stderr[:100]}")
+                print(
+                    f"   ⚠️  SPICE simulation failed: "
+                    f"{spice_result.error or spice_result.stderr[:100]}"
+                )
 
         # Step 4: Compile KiCad EDA project files
         print("\n🔧 Step 4: Generating KiCad project files...")

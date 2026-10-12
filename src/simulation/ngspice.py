@@ -21,6 +21,16 @@ class SimulationResult:
     measurements: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
+    @property
+    def node_voltages(self) -> Dict[str, float]:
+        """DC node voltages from the operating point, keyed by net name."""
+        return dict(self.measurements.get("node_voltages", {}))
+
+    @property
+    def has_results(self) -> bool:
+        """True when the run produced actual numbers, not just a clean exit."""
+        return bool(self.node_voltages)
+
 
 class NgSpiceRunner:
     """
@@ -46,10 +56,19 @@ class NgSpiceRunner:
 
             Path(netlist_path).unlink(missing_ok=True)
 
+            success = result.returncode == 0
+            measurements = parse_operating_point(result.stdout)
             return SimulationResult(
-                success=(result.returncode == 0),
+                success=success,
                 stdout=result.stdout,
                 stderr=result.stderr,
+                measurements=measurements,
+                error=(
+                    None
+                    if measurements
+                    else "ngspice ran but reported no operating point; "
+                    "the netlist may be missing a DC source or a .op directive"
+                ),
             )
         except subprocess.TimeoutExpired:
             return SimulationResult(
@@ -246,6 +265,54 @@ class CircuitIRToSpice:
             return float(value.replace('V', '').replace('v', ''))
         except ValueError:
             return 3.3
+
+
+def parse_operating_point(stdout: str) -> Dict[str, Any]:
+    """
+    Extract DC node voltages from ngspice's operating-point table.
+
+    ngspice prints one table per analysis, with a `device` header line followed
+    by a row per node::
+
+             device        vu1_in      vu1_out
+              dc             5           3.3
+              acmag          0            0
+
+    The `dc` row holds the DC voltage of each node, which is what tells you
+    whether a design actually regulates. Rows are kept only where the value
+    parses as a number, so branch currents and `-` placeholders are ignored.
+    """
+    voltages: Dict[str, float] = {}
+    header: Optional[List[str]] = None
+
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if not parts:
+            continue
+
+        if parts[0] == "device" and len(parts) > 1:
+            header = parts[1:]
+            continue
+
+        # The DC row is the one we want; other rows (acmag, phase, ...) are not.
+        if header and parts[0] == "dc" and len(parts) >= 2:
+            for name, value in zip(header, parts[1:]):
+                try:
+                    voltages[name] = float(value)
+                except ValueError:
+                    continue
+            header = None
+
+    if not voltages:
+        return {}
+    return {
+        "node_voltages": voltages,
+        "min_voltage": min(voltages.values()),
+        "max_voltage": max(voltages.values()),
+    }
 
 
 def simulate_circuit(circuit: CircuitIR, ngspice_path: str = "ngspice") -> SimulationResult:
