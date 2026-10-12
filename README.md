@@ -808,6 +808,7 @@ python -c "import src; print('Python imports OK')"
 | `pytest: command not found` | `pip install -e ".[dev]"` in the active venv |
 | Routing reports a DSN error | Expected: `kicad-cli` has no DSN export in KiCad 7+. See Known Limitations |
 | `UnsupportedClassVersionError` running FreeRouting | The bundled jars need Java 25; install it or skip routing |
+| `.git` directory is several GB | Orphaned submodule caches under `.git/modules/`, left over from when reference repositories were submodules | `rm -rf .git/modules` — see below |
 | Tests fail with `PermissionError` | The security sandbox is not wired into the pipeline; report the test and path involved |
 
 ---
@@ -987,6 +988,45 @@ DSH_REQUIRE_KICAD=1 pytest -q
 | "SPICE ran but produced no operating point" | The netlist has no DC source | Check the design has a supply |
 | DRC reports missing footprint libraries | KiCad's *global* library table is not populated | Harmless: the board embeds its footprints. Configure KiCad libraries to silence it |
 | DRC reports clearance or short errors | A real board problem | Fix before ordering |
+
+---
+
+### Why `.git` can be huge (and how to fix it)
+
+If `du -sh .git` reports gigabytes while the working tree is a couple of
+megabytes, the history is almost never the cause. Check where the space is:
+
+```bash
+du -sh .git/* | sort -rh | head
+git count-objects -vH          # the real history size
+```
+
+The usual culprit is `.git/modules/`: Git keeps a full clone of every submodule
+inside it. This project used to have 32 reference repositories as submodules, so
+those caches reached **14 GB** even after the submodules were removed — the
+working tree was already gone, but the caches were not.
+
+They are safe to delete once nothing references them:
+
+```bash
+# Confirm there is nothing to lose
+test -f .gitmodules && echo "submodules still configured" || echo "none configured"
+git ls-files -s | grep '^160000'        # should print nothing
+
+# Free the space
+rm -rf .git/modules
+for s in $(git config --get-regexp '^submodule\.' | awk '{print $1}' \
+           | sed 's/\.[^.]*$//' | sort -u); do
+    git config --remove-section "$s"
+done
+```
+
+In this repository that took `.git` from **14 GB to 3.8 MB** while keeping all 66
+commits. Verify afterwards with `git fsck`.
+
+**A fresh repository is not needed** for this: the history itself was only
+~120 KB, so recreating the repo would have discarded the commit history for no
+benefit.
 
 ---
 
