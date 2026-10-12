@@ -404,7 +404,7 @@ PYTHONPATH=. pytest tests/ --cov=src --cov-report=term-missing
 
 ## Legal Notice
 
-⚠️ **IMPORTANT:** This software is an independent open-source implementation that does NOT copy or derive from Flux.ai. See `LEGAL_NOTICE.md` and `LEGAL_DISCLAIMER.md` for details. Patent search required before commercial distribution (`research/flux-ai-patent-search.md`).
+⚠️ **IMPORTANT:** This software is an independent open-source implementation that does NOT copy or derive from Flux.ai. See `LEGAL_NOTICE.md` and `LEGAL_DISCLAIMER.md` for details. `research/flux-ai-patent-search.md` explains how to look up Flux.ai patents and compare them against this repository yourself; it contains no patent numbers, because the maintainers have not run a citable search.
 
 ---
 
@@ -538,7 +538,7 @@ If you contribute:
 | `AGENTS.md` | Agent policies for external repositories |
 | `LEGAL_NOTICE.md` | Legal notice |
 | `LEGAL_DISCLAIMER.md` | Legal disclaimer |
-| `research/flux-ai-patent-search.md` | Patent search guide |
+| `research/flux-ai-patent-search.md` | How to search Flux.ai patents and verify independent implementation |
 
 ---
 
@@ -560,4 +560,4 @@ Flux.ai is a proprietary commercial product. This project:
 **READ THE FOLLOWING FILES FOR LEGAL INFORMATION:**
 - `LEGAL_NOTICE.md` - Legal considerations
 - `LEGAL_DISCLAIMER.md` - Detailed legal guidance
-- `research/flux-ai-patent-search.md` - How to search Flux.ai patents (provided for due diligence reference only; this project does **not** use, implement, or derive from any Flux.ai patents)
+- `research/flux-ai-patent-search.md` - How to search Flux.ai patents and verify, subsystem by subsystem, that this project is an independent implementation (this project does **not** use, implement, or derive from any Flux.ai patents)

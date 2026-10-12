@@ -53,7 +53,7 @@ The presence of a repository inside `external/` does not mean that the project h
 
 Flux.ai is a proprietary commercial product. Before any commercial distribution:
 
-1. **SEARCH FOR PATENTS** - Refer to `research/flux-ai-patent-search.md`
+1. **SEARCH FOR PATENTS** - Refer to `research/flux-ai-patent-search.md` for how to search and how to compare any patent found against this repository. This is a due-diligence and transparency aid; searching is not an admission that any patent was used.
 2. **DO NOT COPY** - Never implement Flux.ai's specific algorithms or methods
 3. **INDEPENDENT IMPLEMENTATION** - Write your own code from scratch
 

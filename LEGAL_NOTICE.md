@@ -8,17 +8,31 @@ This project is an **independent, open-source implementation** that **does NOT**
 
 ## Patent Freedom to Operate Statement
 
-As of September 2024, **no patents have been identified** that would prevent the core functionality described in this project.
+The maintainers have **not** conducted a comprehensive, citable patent search for
+Flux.ai-related intellectual property. This project therefore makes **no
+representation** that no such patents exist; the statements below record what has
+and has not been done, and are not a legal conclusion.
 
-However, **patent landscapes are dynamic**. If Flux.ai holds any active patents, they would need to be evaluated on a case-by-case basis.
+What can be stated with confidence is that **no Flux.ai code, algorithms or other
+material was used**. The implementation is independent, its open-source
+influences are recorded in `CREDITS.md` and
+`research/flux-ai-patent-search.md`, and that independence can be checked
+directly against the repository.
+
+Patent landscapes are dynamic. If Flux.ai holds any active patents, they would
+need to be evaluated on a case-by-case basis.
 
 ### Pending Patent Searches
 
-The maintainers have **not conducted a comprehensive patent search** for Flux.ai-related intellectual property. The following should be performed before:
+A patent search should be performed before:
 
 1. Commercial distribution
 2. Public release
 3. Fundraising activities
+
+`research/flux-ai-patent-search.md` explains how to search, and how to compare any
+patent you find against this repository. It deliberately contains no patent
+numbers, because none have been verified.
 
 ## Trademark Notice
 
@@ -83,7 +97,7 @@ To maintain license compliance:
 
 ## Recommended Actions Before Release
 
-1. **Conduct Patent Search** (see flux-ai-patent-search.md)
+1. **Conduct Patent Search** (see flux-ai-patent-search.md, which explains how to search and how to compare any patent you find against this repository; it deliberately lists no patent numbers)
 2. **Review License Compatibility** (see LEGAL_DISCLAIMER.md)
 3. **Document Your Independent Development**
 4. **Consider Legal Insurance** for commercial distribution
@@ -158,7 +172,7 @@ USERS SHOULD CONDUCT THEIR OWN PATENT AND LICENSE ANALYSIS.
 ## Related Documents
 
 - `LEGAL_DISCLAIMER.md` - General legal guidance
-- `research/flux-ai-patent-search.md` - Patent search instructions
+- `research/flux-ai-patent-search.md` - How to search Flux.ai patents and verify independent implementation
 - `LICENSE` - Project license (GPL-3.0)
 
 ---
