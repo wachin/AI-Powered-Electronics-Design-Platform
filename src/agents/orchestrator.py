@@ -24,6 +24,7 @@ from src.core.circuit_ir import (
     PowerDomain,
 )
 from src.core.erc import ERCValidator, ERCReport
+from src.core.design_review import review_circuit
 from src.generators.kicad_generator import KiCadGenerator
 from src.components.database import ComponentDatabase, ComponentSpec
 from src.components.ordering import build_purchase_list
@@ -52,6 +53,9 @@ class DesignRequest:
     boards: int = 1
     # Extra parts allowance as a fraction, e.g. 0.1 for 10% spares.
     spare_fraction: float = 0.0
+    # The ambient temperature the design is expected to work in, for the thermal
+    # budget. A closed enclosure is much worse than 25 °C.
+    ambient_c: float = 25.0
 
 
 @dataclass
@@ -66,6 +70,9 @@ class DesignSummary:
     # The BOM turned into something orderable: LCSC part numbers, stock, prices
     # at the quantity being ordered, and the quantities to actually buy.
     purchase_list: Optional[Any] = None
+    # The computed electrical review: dissipation, dropout, voltage stress, LED
+    # operating point. Replaces the generic "check thermal dissipation" notes.
+    design_review: Optional[Any] = None
     # Provenance: whether the design came from an LLM or the deterministic
     # template generator, and any substitution/inference notes.
     used_llm: bool = True
@@ -81,6 +88,7 @@ class DesignSummary:
             "erc_report": self.erc_report.to_dict(),
             "generated_files": {k: str(v) for k, v in self.generated_files.items()},
             "bom": self.bom,
+            "design_review": self.design_review.to_dict() if self.design_review else None,
             "total_cost": round(
                 sum(item.get("total_price", 0.0) or 0.0 for item in self.bom), 4
             ),
@@ -175,6 +183,23 @@ class AIDesignOrchestrator:
         erc_report = validator.validate()
         status = "✅ PASSED" if erc_report.passed else "❌ FAILED"
         print(f"   {status} - Errors: {erc_report.summary['errors']}, Warnings: {erc_report.summary['warnings']}")
+
+        # Step 2b: Electrical review. The ERC checks connectivity; this checks
+        # that the design's numbers work — dissipation, headroom, voltage stress
+        # and the LED operating point.
+        print("\n📐 Step 2b: Reviewing the electrical design...")
+        design_review = review_circuit(
+            circuit_ir, self.db, requirements, ambient_c=request.ambient_c
+        )
+        for finding in design_review.sorted_findings():
+            print(f"   {finding.render()}")
+        if design_review.failures:
+            print(
+                f"   ❌ {len(design_review.failures)} electrical problem(s) found: "
+                f"this design should not be built as it stands"
+            )
+        else:
+            print(f"   ✅ No electrical problems found ({design_review.summary()})")
 
         # Step 3: SPICE Simulation (if requested)
         spice_result = None
@@ -294,6 +319,7 @@ class AIDesignOrchestrator:
             generated_files=generated_files,
             bom=bom,
             purchase_list=purchase_list,
+            design_review=design_review,
             used_llm=getattr(specification, "used_llm", True),
             topology=getattr(specification, "topology", "") or "",
             design_notes=list(getattr(specification, "warnings", []) or []),

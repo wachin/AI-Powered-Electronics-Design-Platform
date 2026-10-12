@@ -407,7 +407,7 @@ class CircuitSpecificationGenerator:
             ],
             "power_domains": {"VIN": 5.0, "VOUT": 3.3, "GND": 0.0},
             "design_notes": ["LDO dropout: 1.7V", "Power dissipation: 0.85W", "Ensure adequate thermal relief"],
-            "warnings": ["Check thermal dissipation for high current", "Verify dropout voltage at max current"]
+            "warnings": []
         },
         "buck_converter": {
             "topology": "Asynchronous Buck Converter",
@@ -441,7 +441,7 @@ class CircuitSpecificationGenerator:
             ],
             "power_domains": {"VIN": 5.0, "GND": 0.0},
             "design_notes": ["Simple series resistor drive", "Resistor value: (5V - 2.1V) / 0.02A = 145 ohm, use 1.5k for lower brightness"],
-            "warnings": ["Resistor dissipates power: I^2*R = 4mW", "LED forward voltage varies by color"]
+            "warnings": []
         },
         "phono_preamp": {
             "topology": "Stereo RIAA Phono Preamplifier (Moving Magnet)",
@@ -1074,15 +1074,14 @@ class CircuitSpecificationGenerator:
                 {"from": "D1.K", "to": "C1.2", "net": "GND"},
                 {"from": "U1.GND", "to": "C2.2", "net": "GND"},
             ],
+            # The dissipation and dropout are no longer asserted as notes: the
+            # electrical review computes them from the finished circuit and says
+            # whether they pass. A note that says "check this" when the platform
+            # already knows the answer is how a real problem gets ignored.
             "design_notes": [
-                f"LDO dropout: {v_in - v_out:.1f}V",
-                f"Power dissipation: {(v_in - v_out) * i_out:.2f}W",
-                "Ensure adequate thermal relief",
+                f"Linear regulator drops {v_in - v_out:.1f}V at up to {i_out:g}A",
             ],
-            "warnings": [
-                "Check thermal dissipation for high current",
-                "Verify dropout voltage at max current",
-            ] if (v_in - v_out) * i_out > 0.5 else [],
+            "warnings": [],
         }
 
     def _select_ldo(self, v_out: float, i_out: float) -> dict:

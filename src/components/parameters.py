@@ -225,6 +225,110 @@ def parse_value(text: Any, strict: bool = False) -> Optional[ParsedValue]:
     return ParsedValue(value=value, unit=unit, raw=raw)
 
 
+def parse_conditional(text: Any) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Split a catalogue cell of the form ``"1.2V@(1A)"`` into its two numbers.
+
+    Parameters are usually quoted at a stated condition, and the condition is
+    often the number that matters: a dropout of 1.2 V *at 1 A* says nothing about
+    the dropout at 100 mA. Returns ``(value, condition)``, either of which may be
+    ``None`` when it cannot be read.
+
+    The condition is kept as the number only, without its unit, because the
+    catalogue uses the same cell for volts, amps and degrees.
+    """
+    if text is None:
+        return (None, None)
+    raw = str(text)
+    head, _, tail = raw.partition("@")
+    parsed_head = parse_value(head)
+
+    condition: Optional[float] = None
+    if tail:
+        inner = tail.strip().strip("()")
+        # "1A" and "1mA" and "25C" all reduce to a number; the unit is not needed
+        # to read the cell, and guessing at it has caused more harm than good.
+        inner_parsed = parse_value(inner)
+        if inner_parsed is not None:
+            condition = inner_parsed.value
+    return (parsed_head.value if parsed_head else None, condition)
+
+
+@dataclass(frozen=True)
+class TemperatureRange:
+    """An operating temperature range, and what it refers to."""
+
+    minimum: Optional[float]
+    maximum: Optional[float]
+    is_junction: bool = False
+    raw: str = ""
+
+    @property
+    def span(self) -> Optional[float]:
+        if self.minimum is None or self.maximum is None:
+            return None
+        return self.maximum - self.minimum
+
+
+_TEMPERATURE_RE = re.compile(
+    r"(?P<first>[-+]?\d+(?:\.\d+)?)\s*(?:℃|°C|C)?\s*~\s*"
+    r"(?P<second>[-+]?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def parse_temperature_range(text: Any) -> Optional[TemperatureRange]:
+    """
+    Parse an operating temperature cell such as ``"-40℃~+85℃"`` or
+    ``"0℃~+150℃@(Tj)"``.
+
+    The ``Tj`` suffix is recorded, because it decides which limit applies: a
+    150 °C *junction* limit and a 150 °C *ambient* limit are very different
+    numbers for a part that has to dissipate a watt.
+
+    Returns ``None`` when no range can be read, rather than assuming a limit. A
+    made-up thermal limit is worse than an absent one.
+    """
+    if not text:
+        return None
+    raw = str(text)
+    match = _TEMPERATURE_RE.search(raw)
+    if match is None:
+        # A single number with no range, e.g. "150C".
+        single = parse_value(raw.split("@")[0])
+        if single is None:
+            return None
+        return TemperatureRange(
+            minimum=None,
+            maximum=single.value,
+            is_junction="tj" in raw.lower(),
+            raw=raw,
+        )
+
+    try:
+        first = float(match.group("first"))
+        second = float(match.group("second"))
+    except ValueError:
+        return None
+
+    lower_part, _, upper_part = raw.partition("~")
+    lowered = lower_part.lstrip("+-")
+    # A leading minus belongs to the lower bound; without one the range starts at
+    # zero or above, which is how "0℃~+150℃" is written.
+    if "-" not in lower_part and "−" not in lower_part:
+        first = abs(first)
+    else:
+        first = -abs(first)
+    second = abs(second)
+
+    return TemperatureRange(
+        minimum=min(first, second),
+        maximum=max(first, second),
+        is_junction="tj" in raw.lower(),
+        raw=raw,
+    )
+
+
 def parse_tolerance(text: Any) -> Optional[float]:
     """
     Parse a tolerance like ``±1%`` or ``±0.1%`` into a fraction (0.01, 0.001).
@@ -281,6 +385,11 @@ _ATTRIBUTE_KEYS: Dict[str, Tuple[str, ...]] = {
     "forward_voltage": ("Voltage - Forward(Vf@If)", "Voltage - Forward(Vf)"),
     "zener_voltage": ("Zener Voltage(Nom)",),
     "rds_on": ("RDS(on)",),
+    # How much input-to-output headroom the regulator needs at a stated current,
+    # e.g. "1.2V@(1A)". The current matters: dropout rises with load.
+    "dropout": ("Voltage Dropout", "Dropout Voltage"),
+    # The regulator's own supply current, which dissipates in the package too.
+    "quiescent_current": ("Quiescent Current", "standby current", "Supply Current (Iq)"),
     # Text fields that describe what a part is rather than how much of something
     # it has. They matter for matching: an LED's colour is the property a design
     # asks for ("a green indicator LED"), and without it any LED looks the same.
@@ -339,6 +448,8 @@ _NUMERIC_FIELDS = frozenset(
         "forward_voltage",
         "zener_voltage",
         "rds_on",
+        "dropout",
+        "quiescent_current",
     }
 )
 
@@ -540,6 +651,9 @@ __all__ = [
     "category_from_parameters",
     "extract_parameters",
     "format_value",
+    "TemperatureRange",
+    "parse_conditional",
+    "parse_temperature_range",
     "parse_tolerance",
     "parse_value",
     "set_primary",

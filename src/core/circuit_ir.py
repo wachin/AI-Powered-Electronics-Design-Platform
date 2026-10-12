@@ -197,9 +197,26 @@ class CircuitIR:
         return component
 
     def get_or_create_net(self, name: str, is_power: bool = False, voltage: Optional[float] = None) -> Net:
-        if name not in self.nets:
-            self.nets[name] = Net(name=name, is_power=is_power, voltage=voltage)
-        return self.nets[name]
+        """
+        Find a net, or create it.
+
+        Metadata passed in is applied to an existing net rather than dropped. It
+        used to be applied only at creation, so a caller that connected pins
+        first and set the rail voltage afterwards silently lost both the voltage
+        and the power flag — and ERC's power rules and the net class widths then
+        saw a rail that looked like a signal.
+        """
+        net = self.nets.get(name)
+        if net is None:
+            net = Net(name=name, is_power=is_power, voltage=voltage)
+            self.nets[name] = net
+            return net
+
+        if is_power and not net.is_power:
+            net.is_power = True
+        if voltage is not None and net.voltage is None:
+            net.voltage = voltage
+        return net
 
     def connect(self, comp_ref: str, pin: str, net_name: str):
         if comp_ref not in self.components:

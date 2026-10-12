@@ -382,6 +382,16 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--ambient",
+        type=float,
+        default=25.0,
+        metavar="C",
+        help=(
+            "Ambient temperature the design must work in, for the thermal "
+            "budget (default 25). An enclosure is much worse than a bench."
+        ),
+    )
+    parser.add_argument(
         "--spares",
         type=float,
         default=0.0,
@@ -429,6 +439,7 @@ async def _run(args: argparse.Namespace) -> int:
         mcp_validate=args.mcp_validate,
         boards=args.boards,
         spare_fraction=args.spares,
+        ambient_c=args.ambient,
     )
     summary = await orchestrator.process_request(request, output_dir)
 
@@ -448,6 +459,21 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"  Status: {'✅ PASSED' if summary.erc_report.passed else '❌ FAILED'}")
     for key, value in summary.erc_report.summary.items():
         print(f"  - {key.capitalize()}: {value}")
+
+    review = summary.design_review
+    if review is not None and review.findings:
+        print("\n📐 Electrical Review:")
+        print(
+            f"  Status: {'❌ PROBLEMS FOUND' if review.failures else '✅ NO PROBLEMS'}"
+            f" ({review.summary()})"
+        )
+        for finding in review.sorted_findings():
+            print(f"  {finding.render()}")
+        if review.failures:
+            print(
+                "  Build this only after fixing the failures above: they are "
+                "design errors, not opinions."
+            )
 
     if summary.spice_result:
         print("\n⚡ SPICE Simulation:")

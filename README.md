@@ -123,6 +123,7 @@ This project builds an AI-powered electronics design platform that transforms na
 | Web frontend + collaboration | ✅ Implemented (builds, WebSocket server present) |
 | PCB autorouting | ✅ Works (needs Java 25 + the FreeRouting jar) |
 | Trace widths by current (net classes) | ✅ Works, and the routed widths are verified |
+| Electrical review (dissipation, dropout, ratings) | ✅ Works |
 | Smart component placement | ✅ Wired in — drives PCB layout and board outline |
 | Permissions / sandbox / MCP agent | ⚠️ Implemented but not wired in |
 | Datasheet understanding | ❌ Not started |
@@ -261,6 +262,58 @@ program can use. Two details make the contract work in practice:
 | Repair loop | Sends the specific errors back to the model and retries, keeping the best attempt | One bad answer ends the run |
 | Emit | Deterministic S-expression writers for schematic and PCB | Files KiCad cannot open or netlist |
 | Net classes | Power and ground nets get a width sized for their current | A 1 A rail routed at 0.2 mm — about 0.74 A of copper |
+| Electrical review | Computes dissipation, dropout, voltage stress and the LED operating point | A design that heats itself past its limit, or cannot regulate |
+
+---
+
+## The design is reviewed with numbers, not adjectives
+
+The ERC checks connectivity. A second pass checks that the **numbers** work, and
+it replaced a bad habit: the generator used to compute the dissipation and then
+emit `"Check thermal dissipation for high current"`. It knew the number and asked
+the reader to judge it.
+
+```text
+📐 Electrical Review:
+  Status: ✅ NO PROBLEMS (0 failure(s), 0 warning(s), 1 unchecked)
+  [?] U1 (AMS1117-3.3): Dissipates 0.87 W (1.70 V at 0.5 A). At 25 °C ambient it
+      must be better than 144 °C/W for a 150 °C limit, or 115 °C/W for a 125 °C one.
+  [ok] U1 (AMS1117-3.3): 1.05 V of dropout margin at 0.5 A (1.70 V available,
+      0.65 V needed, scaled from 1.3 V at 1 A).
+  [ok] C1 (CC0805KRX7R9BB106): 5 V across a 25 V part (20% of rating).
+  [ok] C2 (CC0805KRX5R7BB226): 3.3 V across a 10 V part (33% of rating).
+  [ok] D1 (LTST-C190KGKT): 3.0-4.2 mA through a Yellow Green LED (330 Ω on 3.3 V).
+  [ok] R1 (RC0805FR-07330RL): Dissipates 3.0 mW of a 125.0 mW rating.
+```
+
+| Check | Where the number comes from |
+|---|---|
+| Regulator dissipation | `(Vin − Vout) × Iout + Vin × Iq`, exactly |
+| **Required θJA** | `(Tj_max − T_ambient) / P` — the figure to look up in the datasheet |
+| Dropout headroom | The catalogue's own `Voltage Dropout` cell, e.g. `1.3V@(1A)`, scaled to the design current |
+| Resistor power | `I²R` against the catalogue's power rating, at a 50 % derating rule |
+| Capacitor stress | Applied net voltage against the rated voltage, at an 80 % derating rule |
+| LED current | `(Vsupply − Vf) / R`, as a **range** |
+
+Three things this deliberately does **not** do:
+
+* **It does not invent a thermal resistance.** θJA depends on the package, the
+  copper area, the layer count and the airflow, and this platform controls none of
+  them. It reports the value the design *needs*, and only returns a verdict when
+  the requirement is outside the range any package could meet either way — below
+  about 20 °C/W nothing survives without a heatsink, above about 250 °C/W anything
+  does. In between it warns and gives you the number to check.
+* **It does not report a single LED current.** An LED's forward voltage is a
+  range: a green LED that drops 2.0 V and one that drops 2.6 V pass very different
+  currents through the same resistor, and both are "green".
+* **It does not silently use different data than the design names.** When the
+  design is built from the built-in placeholder list, whose parts have no
+  datasheet figures, the ratings come from the catalogue part the purchase list
+  would order for the same value and package — and the review says so in its
+  assumptions.
+
+A finding with no data behind it is reported as `[?]`, not as `ok`. A check that
+silently does not run is indistinguishable from a check that passed.
 
 ---
 
@@ -532,6 +585,7 @@ Subcommands:
 Design options relevant to ordering:
   --boards N                How many boards you are building (default 1)
   --spares FRACTION         Extra parts allowance, e.g. 0.1 for 10%
+  --ambient C               Ambient temperature for the thermal budget (default 25)
   mcp-status                Show optional MCP server availability
   mcp-setup [--server X]    Create isolated environments for MCP servers
 ```

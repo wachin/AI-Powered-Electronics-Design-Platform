@@ -585,15 +585,44 @@ Investigate:
   * [x] DC sweep (.dc)
   * [ ] Automated design modification from results - Not implemented
 * [ ] symbolic circuit analysis - Not implemented
-* [ ] electrical constraint checking - Partially via ERC constraints
-* [ ] netlist validation - Via ERC net checks
-* [ ] power-domain validation - PowerDomain in CircuitIR; not fully validated
+* [x] **electrical review** - **IMPLEMENTED** (`src/core/design_review.py`).
+  The ERC checks connectivity; this checks that the numbers work. It replaces
+  the generator's generic "Check thermal dissipation for high current" note with
+  computed findings, because the generator already knew the dissipation and was
+  asking the reader to judge it.
+  * [x] Linear regulator dissipation and the **required** θJA. θJA itself is
+    never assumed: it depends on package, copper area, layer count and airflow,
+    none of which this platform controls. The finding reports the dissipation
+    (exact), the junction limit from the catalogue when the catalogue states one,
+    and the thermal path the design needs. It only returns a verdict when the
+    requirement is outside the range any package could meet either way.
+  * [x] Dropout headroom, from the catalogue's own `Voltage Dropout` cell
+    (`1.3V@(1A)`), scaled to the design current and labelled as an approximation.
+  * [x] Resistor dissipation by I²R, against the catalogue's power rating, with a
+    50 % derating rule.
+  * [x] Capacitor voltage stress against the catalogue's voltage rating, with an
+    80 % derating rule.
+  * [x] LED operating point: the current through the wired series resistor,
+    reported as a **range**, because an LED's forward voltage is a range and a
+    green LED that drops 2.0 V and one that drops 2.6 V pass very different
+    currents through the same resistor.
+  * [x] Ratings for a design built from the built-in placeholder list are taken
+    from the catalogue part the purchase list would order for the same value and
+    package, and the substitution is disclosed in the review's assumptions.
+* [x] netlist validation - Via ERC net checks
+* [x] power-domain validation - `PowerDomain` in CircuitIR, used for the net class
+  widths and the electrical review. Fixed: `get_or_create_net` used to discard
+  metadata passed for an existing net, so a caller that connected pins first and
+  set the rail voltage afterwards silently lost the voltage and the power flag.
 * [ ] pin compatibility - Not implemented
-* [ ] voltage compatibility - Not implemented
-* [ ] current requirements - Not implemented
+* [ ] voltage compatibility - Partially: ratings are checked per component, not
+  across a net
+* [ ] current requirements - Partially: resistor and regulator currents are
+  computed, but a net's total current is not summed
 * [x] decoupling verification - ERC rule implemented
 * [ ] pull-up/pull-down verification - Not implemented
-* [ ] component rating verification - Not implemented
+* [x] component rating verification - **IMPLEMENTED** for dissipation, voltage
+  and dropout, from catalogue attributes
 
 Determine which checks should be performed by deterministic software rather than by the LLM.
 
