@@ -49,6 +49,15 @@ This project builds an AI-powered electronics design platform that transforms na
     validation, and an automatic repair loop (see `docs/llm-pipeline.md`)
 
 ### Known Limitations
+- ⚠️ **The router may narrow a trace below its net class width.** FreeRouting was
+  observed laying two segments of a 0.6 mm power net at 0.45 mm where the wider
+  trace did not fit. The run reports every net that came out narrower than its
+  class, with the current the narrower width can carry, but it does not fail the
+  design — see [Trace widths](#trace-widths-are-chosen-for-the-current).
+- ⚠️ **Trace widths assume 1 oz outer copper and a 10 °C rise** (IPC-2221). A
+  2 oz board or a different rise allowance would change them, and the platform
+  does not model a copper pour, so a net highlighted as narrow may in practice be
+  backed by plane copper.
 - ⚠️ **Auto-routing needs Java 25 and a FreeRouting jar**, neither of which is a
   Python dependency:
   - FreeRouting jars are compiled to class-file version 69, so Java 21 refuses
@@ -71,6 +80,18 @@ This project builds an AI-powered electronics design platform that transforms na
 - ⚠️ **The catalog's JLCPCB "Basic" library flag is effectively empty** (1 part
   of 179,894). Ranking uses the Preferred flag (972 parts) instead. See
   [Where it comes from](#where-it-comes-from).
+- ⚠️ **Most of the built-in fallback catalog's part numbers are placeholders.**
+  Checked against the downloaded catalog, of its 38 parts **7 exist in the
+  package listed** (`AMS1117-3.3`, `1N4148W`, `SS14`, `2N7002`, `SI2302`,
+  `TL431`, `LM317L`), **3 exist only in another package** (`LM7805`,
+  `LM2596S-5.0`, `LM358` — the footprint will not fit), and **28 do not exist at
+  all**. Numbers like `CC0805KRX7R9BB106` and `RC0805FR-07330RL` are
+  Yageo-shaped placeholders. The list is kept because it gives the pipeline
+  symbols and pinouts it is verified against, not because it is orderable: the
+  purchase list resolves every value and package to a real catalog part and says
+  on the line when the part number changed. `VERIFIED_BUILTIN_MPNS` in
+  `src/components/database.py` records the verified set, and a test fails if it
+  drifts.
 - ⚠️ Three implemented subsystems are **not wired into the pipeline**: the
   permission system, the process sandbox, and the free-form MCP agent. They have
   tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
@@ -94,12 +115,14 @@ This project builds an AI-powered electronics design platform that transforms na
 | CLI + Python API | ✅ Works |
 | Component search (numeric, 179,894 parts) | ✅ Works |
 | Substitute lookup with per-part evidence | ✅ Works |
+| Orderable purchase list + `bom.csv` for JLCPCB | ✅ Works |
 | Natural language → specification | ✅ Works (local or cloud LLM) |
 | Specification → validated Circuit IR | ✅ Works |
 | Schematic + PCB + Gerbers | ✅ Works and is KiCad-verified |
 | SPICE simulation | ✅ Works |
 | Web frontend + collaboration | ✅ Implemented (builds, WebSocket server present) |
 | PCB autorouting | ✅ Works (needs Java 25 + the FreeRouting jar) |
+| Trace widths by current (net classes) | ✅ Works, and the routed widths are verified |
 | Smart component placement | ✅ Wired in — drives PCB layout and board outline |
 | Permissions / sandbox / MCP agent | ⚠️ Implemented but not wired in |
 | Datasheet understanding | ❌ Not started |
@@ -237,8 +260,76 @@ program can use. Two details make the contract work in practice:
 | Validation | Schema, MPN existence, pin existence, and 6 ERC rules | A board that looks fine and does not work |
 | Repair loop | Sends the specific errors back to the model and retries, keeping the best attempt | One bad answer ends the run |
 | Emit | Deterministic S-expression writers for schematic and PCB | Files KiCad cannot open or netlist |
+| Net classes | Power and ground nets get a width sized for their current | A 1 A rail routed at 0.2 mm — about 0.74 A of copper |
 
 ---
+
+## Trace widths are chosen for the current
+
+Every net gets a KiCad **net class**, and power nets get a width sized for the
+current they carry. This is not cosmetic: a 0.2 mm trace carries about 0.74 A on
+1 oz outer copper at a 10 °C rise, so routing a 1 A regulator output at 0.2 mm
+makes a resistor that heats up and fails under load — after the boards are made.
+
+The widths come from IPC-2221:
+
+```
+I = k · ΔT^0.44 · A^0.725      k = 0.048 outer layer, 0.024 inner
+```
+
+| Class | Track | Clearance | Carries (1 oz, 10 °C, outer) |
+|---|---:|---:|---:|
+| `Default` | 0.25 mm | 0.20 mm | 0.88 A |
+| `SIG` | 0.25 mm | 0.20 mm | 0.88 A |
+| `PWR` | 0.60 mm | 0.25 mm | 1.65 A |
+| `PWR_HI` | 0.80 mm | 0.30 mm | 2.03 A |
+
+`PWR_HI` is used for a rail above 1.2 A, and for **any** rail on a board with more
+than two layers — an inner trace dissipates heat into FR-4 rather than air and
+needs about twice the copper, and KiCad net classes carry one width for all
+layers.
+
+### The setting that actually matters
+
+```bash
+# This does NOT reach the router:
+"board": {"design_settings": {"defaults": {"track_width": 0.25}}}
+
+# This does:
+"net_settings": {"classes": [{"name": "PWR", "track_width": 0.6, ...}],
+                 "netclass_assignments": {"GND": "PWR", "VIN": "PWR"}}
+```
+
+The first is the default for interactive routing in the GUI. With no
+`net_settings` block, KiCad falls back to its built-in `Default` class of
+**0.2 mm** and exports *that* in the Specctra DSN — which is what FreeRouting
+routes from. The project file looked like it set a width and did not. Verified by
+experiment: a project with `defaults.track_width = 0.33` and no net classes
+produced a DSN carrying `(width 200)`.
+
+Net membership is written as an **explicit map** rather than KiCad's regex
+patterns, because net names are not regex-safe: `+5V` and `Net-(D1-K)` would have
+to be escaped, and an escaping mistake silently classifies the wrong net.
+
+### The widths are checked after routing
+
+The platform asks for a width and then verifies it got one. FreeRouting narrowed
+two segments of the 0.6 mm power nets to 0.45 mm on the reference design, so the
+run reports it:
+
+```text
+ℹ️  PWR: 0.6 mm track, 0.25 mm clearance — carries 1.65 A on 1 oz copper at a 10 °C rise
+⚠️  VOUT was routed at 0.45 mm but its PWR class asks for 0.6 mm; 0.45 mm carries
+    about 1.34 A on 1 oz copper at a 10 °C rise. Check the current this net carries.
+```
+
+Not every narrowing is a fault — 0.45 mm still carries 1.34 A, comfortably above
+what that rail needs. But it is *not* what the design was checked against, so it
+is reported rather than assumed away. A router is free to lay a narrower trace
+where the wider one does not fit, and the platform does not currently check that
+the narrowed trace still meets the requirement; it says so and leaves the
+judgement to the reader.
+
 
 ## Architecture Overview
 
@@ -437,6 +528,10 @@ Subcommands:
   catalog-setup [--dest P]  Download the full component catalog (~145 MB)
   parts-search "10k 0603"   Search it by value, package, tolerance, rating
   parts-substitute C12345   Find replacements, with what was verified
+
+Design options relevant to ordering:
+  --boards N                How many boards you are building (default 1)
+  --spares FRACTION         Extra parts allowance, e.g. 0.1 for 10%
   mcp-status                Show optional MCP server availability
   mcp-setup [--server X]    Create isolated environments for MCP servers
 ```
@@ -690,6 +785,70 @@ part cannot be chosen; a flagged one can.
 
 A part with no numeric value (identified only by a part number) cannot be
 compared this way, and the command says so rather than guessing.
+
+### Buying the parts
+
+A correct design is not yet an order. Every generated design now ends with a
+purchase list, and with it two files you can act on:
+
+```
+ldo_regulator-bom.csv            upload this to JLCPCB's assembly order form
+ldo_regulator-purchase-list.md   read this: totals, quantities, caveats
+```
+
+```bash
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED" \
+    -o ./my_project --boards 5
+```
+
+```text
+🛒 Purchase list (5 boards, JLCPCB):
+  Refs       Value      Order  LCSC       Part                         Unit     Line
+  C1         10uF          35  C18185759  TCC0805X5R106M250FT       $0.0843    $2.95
+  C2         22uF          35  C7432777   HGC0805R5226K100NSLJ      $0.0615    $2.15
+  D1         Green         25  C20883097  17-21/G6C-AN1P1B/4T       $0.0330    $0.83
+  U1         3.3V           5  C18212698  AMS1117-3.3               $0.0533    $0.27
+  R1         330           35  C50397132  CL0805FN330RPS            $0.0047    $0.16
+
+  Estimated total: $6.36
+  Prices exclude assembly, stencil and shipping.
+```
+
+**The LCSC column is the whole point.** Before this existed, a generated BOM
+named `CC0805KRX7R9BB106` and quoted an AMS1117 at $0.15. Both look like real
+data and neither is orderable: that part number is not in the JLCPCB catalog, and
+the real price of that regulator is $0.0187. A part number you cannot type into
+the order form is not a BOM.
+
+What each line accounts for:
+
+| Column | Where it comes from |
+|---|---|
+| **Order** | `designators × boards`, then the JLCPCB **attrition** allowance, then raised to the **minimum order quantity**. The arithmetic is written into `purchase-list.md`, e.g. `Quantity 35 = 1 x 5 board(s) + attrition 6/board + minimum order 20` |
+| **LCSC** | An exact part-number match when the catalog has the design's part, otherwise the best in-stock part with the same value and package |
+| **Unit / Line** | The catalog's **quantity tier** for the quantity being ordered — the price at 10 pieces is not the price at 10,000 — with the tier table read from the catalog, not estimated |
+| **Stock** | Bold when there is not enough for the order, and summarised as a warning |
+
+Two checks specifically guard the dangerous case. Part numbers that are
+**nearly identical** to the design's are called out — `LM337L` (negative
+regulator) and `LM317L` (positive) differ by one character, and a value of
+`Adjustable` cannot tell them apart. And a value that contains no number
+(`Green`, `Adjustable`) is flagged as not identifying a specific part.
+
+The list is deliberately honest about what it does *not* know:
+
+* when the orderable part is a **different part number**, the line says so.
+  For a two-terminal passive it also says there is no pinout to check; for an IC
+  it says to verify the pinout, because matching values do not guarantee
+  matching pins;
+* a line with **no catalog match** is listed as not orderable rather than being
+  quietly dropped or given an invented part number;
+* without the full catalog every line is marked not orderable and the prices are
+  labelled as placeholders, so an estimate is never presented as a quote.
+
+The design itself is not modified. The schematic keeps the symbol and pinout it
+was validated against; the purchase list is a separate, explicit mapping on top
+of it.
 
 ### Where it comes from
 

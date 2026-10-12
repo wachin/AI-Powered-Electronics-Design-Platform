@@ -87,6 +87,11 @@ class Component:
     attributes: Dict[str, Any] = field(default_factory=dict)
     position: Optional[Point2D] = None
     rotation: float = 0.0
+    # The package as the catalogue names it ("0603", "SOT-223"), which is not the
+    # same string as the KiCad footprint ("Resistor_SMD:R_0603_1608Metric").
+    # Needed to look a part up for ordering; derived from the footprint when the
+    # component came from somewhere that only knows footprints.
+    package: str = ""
 
     def add_pin(self, number: str, name: str, pin_type: PinType = PinType.UNSPECIFIED) -> Pin:
         pin = Pin(number=number, name=name, pin_type=pin_type)
@@ -112,7 +117,8 @@ class Component:
             "pins": [p.to_dict() for p in self.pins],
             "attributes": self.attributes,
             "position": self.position.to_dict() if self.position else None,
-            "rotation": self.rotation
+            "rotation": self.rotation,
+            "package": self.package,
         }
 
 

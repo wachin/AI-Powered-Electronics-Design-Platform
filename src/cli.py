@@ -372,6 +372,26 @@ Examples:
         help="Disable SPICE simulation (ngspice)",
     )
     parser.add_argument(
+        "--boards",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "How many boards you are building (default 1). Quantities in the "
+            "purchase list scale with this."
+        ),
+    )
+    parser.add_argument(
+        "--spares",
+        type=float,
+        default=0.0,
+        metavar="FRACTION",
+        help=(
+            "Extra parts allowance as a fraction, e.g. 0.1 for 10%% spares for "
+            "hand assembly (default 0)."
+        ),
+    )
+    parser.add_argument(
         "--no-routing",
         action="store_true",
         help="Disable PCB auto-routing (FreeRouting)",
@@ -407,6 +427,8 @@ async def _run(args: argparse.Namespace) -> int:
         run_spice=not args.no_spice,
         run_routing=not args.no_routing,
         mcp_validate=args.mcp_validate,
+        boards=args.boards,
+        spare_fraction=args.spares,
     )
     summary = await orchestrator.process_request(request, output_dir)
 
@@ -450,13 +472,47 @@ async def _run(args: argparse.Namespace) -> int:
     for file_type, file_path in summary.generated_files.items():
         print(f"  - {file_type.upper()}: {file_path}")
 
-    print("\n📊 Bill of Materials (BOM):")
-    for item in summary.bom:
-        designators = ", ".join(item["designators"])
+    # The purchase list is what the design is turned into an order from, so it is
+    # what gets printed. The raw BOM stays in design_summary.json.
+    purchase = summary.purchase_list
+    if purchase is not None and purchase.lines:
+        boards = purchase.boards
         print(
-            f"  - [{designators}] {item['mpn']} ({item['value']}) - "
-            f"Qty: {item['quantity']} - Est: ${item['total_price']:.2f}"
+            f"\n🛒 Purchase list ({boards} board{'s' if boards != 1 else ''}, "
+            f"JLCPCB):"
         )
+        print(
+            f"  {'Refs':<10} {'Value':<9} {'Order':>6}  {'LCSC':<10} "
+            f"{'Part':<24} {'Unit':>8} {'Line':>8}"
+        )
+        for line in purchase.lines:
+            refs = ", ".join(line.designators)
+            lcsc = line.lcsc_part or "—"
+            part = (line.order_mpn or line.mpn)[:24]
+            if line.price_source == "unknown":
+                unit = line_total = "—"
+            else:
+                unit = f"${line.unit_price:.4f}"
+                line_total = f"${line.line_total:.2f}"
+            print(
+                f"  {refs:<10} {line.value[:9]:<9} {line.order_quantity:>6}  "
+                f"{lcsc:<10} {part:<24} {unit:>8} {line_total:>8}"
+            )
+        if purchase.has_placeholder_prices:
+            print(f"\n  Estimated total: ${purchase.total_cost:.2f} (includes placeholder prices)")
+        else:
+            print(f"\n  Estimated total: ${purchase.total_cost:.2f}")
+        print("  Prices exclude assembly, stencil and shipping.")
+        for warning in purchase.warnings():
+            print(f"  ⚠️  {warning}")
+    else:
+        print("\n📊 Bill of Materials (BOM):")
+        for item in summary.bom:
+            designators = ", ".join(item["designators"])
+            print(
+                f"  - [{designators}] {item['mpn']} ({item['value']}) - "
+                f"Qty: {item['quantity']} - Est: ${item['total_price']:.2f}"
+            )
 
     summary_json_path = output_dir / "design_summary.json"
     summary_json_path.write_text(json.dumps(summary.to_dict(), indent=2))

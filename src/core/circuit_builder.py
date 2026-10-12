@@ -443,6 +443,7 @@ class CircuitIRBuilder:
             mpn=component.mpn or None,
             manufacturer=component.manufacturer or None,
             description=component.reasoning or None,
+            package=component.package or "",
         )
         for number, pin_name, pin_type in component.pins:
             ir.add_pin(number, pin_name, pin_type)

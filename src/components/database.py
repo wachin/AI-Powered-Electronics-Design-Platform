@@ -35,6 +35,10 @@ class ComponentSpec:
     is_preferred: bool = False
     datasheet_url: str = ""
     product_url: str = ""
+    # Quantity price breaks, ascending: [{"quantity": n, "unit_price": p}].
+    # Needed to price an order correctly: the unit price at 10 pieces is not the
+    # unit price at 10,000.
+    prices: List[Dict[str, Any]] = field(default_factory=list)
     # Minimum quantity the distributor sells, and its own attrition figures.
     # Carried through so a bill of materials can round quantities up honestly.
     min_order: int = 1
@@ -60,6 +64,7 @@ class ComponentSpec:
             "product_url": self.product_url,
             "min_order": self.min_order,
             "attrition": self.attrition,
+            "prices": self.prices,
         }
 
     @property
@@ -84,6 +89,26 @@ class ComponentSpec:
         return {k: v for k, v in parsed.items() if k != "raw"}
 
 
+# The built-in part numbers that were checked and do exist in the downloaded
+# JLCPCB catalogue, in the package listed here. Anything in the built-in list
+# outside this set is a placeholder. Kept as data so the test can assert the set
+# rather than trusting a comment.
+VERIFIED_BUILTIN_MPNS = frozenset(
+    {
+        "AMS1117-3.3",
+        "1N4148W",
+        "SS14",
+        "2N7002",
+        "SI2302",
+        "TL431",
+        "LM317L",
+    }
+)
+
+# Same electrical part, but the catalogue only carries it in another package.
+VERIFIED_BUILTIN_OTHER_PACKAGE = frozenset({"LM7805", "LM2596S-5.0", "LM358"})
+
+
 class ComponentDatabase:
     """
     Unified component database with JLCPCB/LCSC integration.
@@ -104,7 +129,31 @@ class ComponentDatabase:
         self._load_fallback_catalog()
 
     def _load_fallback_catalog(self):
-        """Loads a standard set of common electronic components as fallback."""
+        """
+        Loads the curated built-in parts used when the catalogue is absent.
+
+        Read this before trusting a part number from this list. Checked against
+        the downloaded JLCPCB catalogue:
+
+        * **7 of the 38 part numbers exist upstream in the package given here**
+          (``AMS1117-3.3``, ``1N4148W``, ``SS14``, ``2N7002``, ``SI2302``,
+          ``TL431``, ``LM317L``) and can be ordered as written;
+        * **3 exist as the same electrical part in a different package**
+          (``LM7805``, ``LM2596S-5.0``, ``LM358``) — the footprint will not match;
+        * **the remaining 28 do not exist at any distributor.** Numbers such as
+          ``CC0805KRX7R9BB106`` and ``RC0805FR-07330RL`` are Yageo-shaped
+          placeholders, not orderable parts.
+
+        This list is kept because it gives the pipeline a symbol and a pinout it
+        has been verified against, and because the platform must work with no
+        catalogue at all. It is **not** a purchasing list: every design is turned
+        into an order by :mod:`src.components.ordering`, which resolves each
+        value and package to a real catalogue part, records the LCSC number, and
+        says on the line when the part number changed.
+
+        Do not add a part number here that has not been checked against the real
+        catalogue. ``tests/test_ordering.py`` enforces the verified set.
+        """
         self._fallback_catalog = [
             # Regulators
             ComponentSpec(
@@ -750,25 +799,41 @@ class ComponentDatabase:
         return results
 
     def get_by_mpn(self, mpn: str) -> Optional[ComponentSpec]:
-        """Find exact component by Manufacturer Part Number (MPN) or LCSC part."""
-        # Try JLCParts first
+        """
+        Find an exact component by Manufacturer Part Number or LCSC number.
+
+        The catalogue is consulted first and matches on the part number itself,
+        not on a text search that happens to rank the right part first. The
+        built-in list is the fallback, and callers that must not use a
+        placeholder part should check ``ComponentSpec.lcsc_part`` before
+        treating the result as orderable.
+        """
         if self.using_jlcparts:
-            # Try as LCSC part number
             if mpn.upper().startswith("C") and mpn[1:].isdigit():
                 jlc_part = self._jlcparts_db.lookup(mpn)
                 if jlc_part:
                     return self._jlcpart_to_spec(jlc_part)
-            
-            # Try as MPN via search
-            results = self._jlcparts_db.search(query=mpn, limit=1)
-            if results and results[0].mfr_part.lower() == mpn.lower():
-                return self._jlcpart_to_spec(results[0])
 
-        # Fallback
+            exact = self._jlcparts_db.lookup_mpn(mpn)
+            if exact:
+                return self._jlcpart_to_spec(exact[0])
+
         for part in self._fallback_catalog:
             if part.mpn.lower() == mpn.lower():
                 return part
         return None
+
+    def find_in_catalog(self, mpn: str) -> List[ComponentSpec]:
+        """
+        Every catalogue entry with this exact MPN, best stock first.
+
+        Separate from :meth:`get_by_mpn` because that one falls back to the
+        built-in list, whose part numbers are placeholders that no distributor
+        stocks. Turning a design into an order needs to know the difference.
+        """
+        if not self.using_jlcparts:
+            return []
+        return [self._jlcpart_to_spec(p) for p in self._jlcparts_db.lookup_mpn(mpn)]
 
     def get_by_lcsc(self, lcsc_part: str) -> Optional[ComponentSpec]:
         """Find component by LCSC part number (e.g., 'C123456')."""
@@ -964,6 +1029,7 @@ class ComponentDatabase:
             product_url=jlc.product_url,
             min_order=jlc.min_order,
             attrition=dict(jlc.attrition),
+            prices=[dict(tier) for tier in jlc.prices],
         )
 
     def _search_fallback(

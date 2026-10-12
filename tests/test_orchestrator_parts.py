@@ -84,3 +84,65 @@ class TestTemplateCircuitValues:
         circuit = orchestrator._synthesize_circuit_ir("Simple LED circuit", "test")
         values = {ref: component.value for ref, component in circuit.components.items()}
         assert values["R1"] == "330"
+
+
+class TestPurchaseListArtifacts:
+    """
+    The design has to end as something that can be ordered.
+
+    The two files written here are the point of the pipeline for anyone actually
+    building the board: the CSV is uploaded to JLCPCB, the Markdown is read.
+    """
+
+    def _run(self, tmp_path, boards=1, spare_fraction=0.0):
+        import asyncio
+
+        from src.agents.orchestrator import DesignRequest
+
+        orchestrator = AIDesignOrchestrator(db=ComponentDatabase())
+        request = DesignRequest(
+            prompt="Design a 5V to 3.3V LDO regulator",
+            project_name="purchase_test",
+            run_spice=False,
+            run_routing=False,
+            boards=boards,
+            spare_fraction=spare_fraction,
+        )
+        return asyncio.run(orchestrator.process_request(request, tmp_path))
+
+    def test_writes_both_artifacts(self, tmp_path):
+        summary = self._run(tmp_path)
+        bom_csv = summary.generated_files.get("bom_csv")
+        purchase_md = summary.generated_files.get("purchase_list")
+        assert bom_csv is not None and bom_csv.exists()
+        assert purchase_md is not None and purchase_md.exists()
+
+    def test_csv_is_in_the_upload_format(self, tmp_path):
+        summary = self._run(tmp_path)
+        text = summary.generated_files["bom_csv"].read_text(encoding="utf-8")
+        assert text.splitlines()[0] == "Comment,Designator,Footprint,LCSC Part #"
+
+    def test_board_count_reaches_the_purchase_list(self, tmp_path):
+        summary = self._run(tmp_path, boards=7)
+        assert summary.purchase_list.boards == 7
+
+    def test_summary_json_carries_the_purchase_list(self, tmp_path):
+        summary = self._run(tmp_path)
+        payload = summary.to_dict()
+        assert "purchase_list" in payload
+        assert payload["purchase_list"]["boards"] == 1
+        # The design BOM's own total must be present too; it was missing before.
+        assert "total_cost" in payload
+
+    def test_an_unorderable_design_says_so_rather_than_failing(self, tmp_path, monkeypatch):
+        """
+        Without a catalogue the parts cannot be ordered. The design still
+        completes, and the purchase list states the limitation instead of
+        implying an order is possible.
+        """
+        monkeypatch.setenv("JLC_PARTS_CATALOG", str(tmp_path / "absent.sqlite3"))
+        summary = self._run(tmp_path)
+        purchase = summary.purchase_list
+        assert purchase.lines
+        assert purchase.orderable_lines == []
+        assert any("catalog-setup" in warning for warning in purchase.warnings())

@@ -11,6 +11,12 @@ import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
+from src.pcb.netclasses import (
+    DEFAULT_CLASS,
+    build_net_settings,
+    describe_netclasses,
+    netclass_assignments,
+)
 from src.core.circuit_ir import CircuitIR, Component, Net, ComponentType
 from src.generators.kicad_symbols import get_symbol_library
 from src.generators.kicad_footprints import (
@@ -533,7 +539,21 @@ class KiCadGenerator:
         return "\n".join(lines)
 
     def generate_project_config(self, project_name: str) -> str:
-        """Generates KiCad project JSON file (.kicad_pro)."""
+        """
+        Generates the KiCad project file (.kicad_pro), including net classes.
+
+        The net classes are the part that matters. ``design_settings.defaults``
+        sets the width the *interactive* router in the GUI will use, and is
+        ignored by everything else: with no ``net_settings`` block, KiCad falls
+        back to its built-in Default class of 0.2 mm, and the Specctra DSN it
+        exports — which is what FreeRouting routes from — carries that 0.2 mm for
+        every net, including a 1 A regulator output. ``net_settings`` is what
+        actually reaches the router.
+        """
+        assignments = netclass_assignments(
+            self.circuit.nets.values(),
+            getattr(self.circuit, "power_domains", None),
+        )
         config = {
             "meta": {
                 "filename": f"{project_name}.kicad_pro",
@@ -548,11 +568,18 @@ class KiCadGenerator:
             "board": {
                 "design_settings": {
                     "defaults": {
-                        "track_width": 0.25,
-                        "via_diameter": 0.8,
-                        "via_hole": 0.4
+                        "track_width": DEFAULT_CLASS.track_width,
+                        "via_diameter": DEFAULT_CLASS.via_diameter,
+                        "via_hole": DEFAULT_CLASS.via_drill,
                     }
                 }
-            }
+            },
+            "net_settings": build_net_settings(assignments),
+            # Recorded so a reader can see what the widths were chosen for,
+            # without having to reverse the IPC-2221 arithmetic themselves.
+            "ai_electronics_design": {
+                "netclass_assignments": assignments,
+                "netclass_rationale": describe_netclasses(assignments),
+            },
         }
         return json.dumps(config, indent=2)

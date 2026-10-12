@@ -352,6 +352,44 @@ Explain the advantages and disadvantages.
 
 ---
 
+- [x] **IMPLEMENTED** - Trace widths per net, driven by current
+  (``src/pcb/netclasses.py``). The generator previously wrote
+  ``board.design_settings.defaults.track_width``, which is the *interactive*
+  routing default and is ignored by everything else: with no ``net_settings``
+  block KiCad falls back to its built-in 0.2 mm Default class and the Specctra
+  DSN — the file FreeRouting routes from — carried 0.2 mm for every net,
+  including a 1 A regulator output that needs 0.30 mm. Verified by experiment.
+- [x] **IMPLEMENTED** - Widths from IPC-2221
+  (``I = k·ΔT^0.44·A^0.725``, k=0.048 outer / 0.024 inner, 1 oz = 1.378 mil),
+  checked against published values: 1 A → 0.30 mm and 2 A → 0.78 mm on an outer
+  layer, 1 A → 0.78 mm on an inner one. Classes: Default/SIG 0.25 mm (0.88 A),
+  PWR 0.6 mm (1.65 A), PWR_HI 0.8 mm (2.03 A, used above 1.2 A or on a board with
+  more than two layers, where a single width per class must be sized for the
+  inner case).
+- [x] **IMPLEMENTED** - Net membership is written as an explicit
+  ``netclass_assignments`` map rather than KiCad's regex patterns, because net
+  names are not regex-safe (``+5V``, ``Net-(D1-K)``). A power net with no stated
+  current still gets the power class — falling back to the signal class there
+  would give a rail a 0.25 mm trace, the exact failure this work prevents.
+- [x] **IMPLEMENTED** - The routed widths are read back off the board after
+  routing and compared against what each net class asked for. The reference
+  design comes out with GND and VOUT at 0.45 mm instead of 0.6 mm, because
+  FreeRouting narrows a segment where the wider trace does not fit; the run
+  reports it with the current the narrower width can carry.
+- [ ] **OPEN** - The narrowing is reported, not analysed. Whether the narrowed
+  trace still meets the net's current requirement is left to the reader, and a
+  copper pour is not modelled, so a narrow trace may in practice be backed by
+  plane copper.
+- [x] **VERIFIED** - Setting net classes in the ``.kicad_pro`` is sufficient: no
+  change to the ``.kicad_pcb`` and no editing of the DSN is needed.
+  ``ExportSpecctraDSN`` reads the loaded net classes and emits
+  ``(class PWR GND VIN VOUT (rule (width 600) (clearance 250)))``, and
+  ``ImportSpecctraSES`` preserves the widths FreeRouting chose. Confirmed by
+  loading the generated project with ``pcbnew`` and by running the router:
+  power nets came out at 0.6 mm and signal nets at 0.25 mm.
+
+---
+
 # 7. COMPONENT DATABASE
 
 - [x] **IMPLEMENTED** - JLCPCB/LCSC offline catalog (CDFER republish of
@@ -382,6 +420,51 @@ Explain the advantages and disadvantages.
 - [x] **IMPLEMENTED** - Web UI: numeric search with the interpretation shown,
   per-category part counts, and an "Alternatives" action listing each
   substitute's reasons and caveats.
+- [x] **IMPLEMENTED** - An orderable purchase list
+  (`src/components/ordering.py`). Every generated design writes
+  ``<project>-bom.csv`` in the format JLCPCB's assembly order form accepts
+  (Comment, Designator, Footprint, LCSC Part #) and a readable
+  ``<project>-purchase-list.md``. Each designator is mapped to a real catalog
+  part —
+  by exact part number when the catalog has it, otherwise by value and package —
+  and the line carries stock, the price **at the quantity being ordered** from
+  the catalog's tier table, and an order quantity that includes JLCPCB's
+  attrition allowance and minimum order quantity. ``--boards N`` scales
+  quantities; ``--spares 0.1`` adds a hand-assembly allowance.
+- [x] **IMPLEMENTED** - The purchase list states what it does not know. A part
+  that only matched the built-in placeholder list is reported as **not
+  orderable** rather than given an invented part number; a different part number
+  is disclosed, with a pinout warning for anything that is not a two-terminal
+  passive; insufficient stock is a warning; and without the full catalog the
+  prices are labelled as placeholders so an estimate is never read as a quote.
+- [x] **VERIFIED** - Audited every part number in the built-in catalog against
+  the downloaded catalogue: **7 of 38 exist in the package listed**
+  (``AMS1117-3.3``, ``1N4148W``, ``SS14``, ``2N7002``, ``SI2302``, ``TL431``,
+  ``LM317L``), **3 exist only in another package** (``LM7805``,
+  ``LM2596S-5.0``, ``LM358``), and **28 do not exist at all**. The verified sets
+  are declared in ``src/components/database.py`` and a test fails if the
+  catalogue drifts or the documentation counts become wrong.
+- [x] **IMPLEMENTED** - The LLM prompt no longer teaches invented part numbers.
+  Its few-shot examples used to name ``CC0805KRX7R9BB106`` and ``LTST-C190KGKT``
+  while the instructions said not to invent part numbers — the model copied the
+  examples. ``mpn`` is now optional in the schema, the examples carry empty part
+  numbers, and the catalog hint is the only source of part numbers the model may
+  cite, with ``lcsc`` supplied alongside ``mpn``.
+- [x] **IMPLEMENTED** - The catalog hint is filtered to parts that fit the
+  request. It previously listed the four highest-stock parts of each category,
+  which offered 5 V regulators for a 3.3 V design.
+- [x] **IMPLEMENTED** - Near-miss part numbers are flagged. ``LM337L`` (negative
+  adjustable regulator) was being swapped for ``LM317L`` (positive) because both
+  have the value "Adjustable"; the purchase list now reports when two part
+  numbers are nearly identical and when a value contains no number at all.
+- [x] **IMPLEMENTED** - Exact part-number lookup in the catalog
+  (``JLCPartsDatabase.lookup_mpn``). The previous fuzzy path ranked by stock and
+  then checked whether the first hit matched, so ``get_by_mpn("AMS1117-3.3")``
+  missed all six catalog entries for that part and fell back to the placeholder.
+- [x] **IMPLEMENTED** - ``Component.package`` carries the catalog package name
+  (``0603``) rather than leaving callers to parse it back out of a KiCad
+  footprint (``Resistor_SMD:R_0603_1608Metric``), with a footprint parser as the
+  fallback for designs that only know footprints.
 
 Known gaps in the catalogue data, verified against the downloaded file rather
 than assumed:

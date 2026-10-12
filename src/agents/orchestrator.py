@@ -26,6 +26,12 @@ from src.core.circuit_ir import (
 from src.core.erc import ERCValidator, ERCReport
 from src.generators.kicad_generator import KiCadGenerator
 from src.components.database import ComponentDatabase, ComponentSpec
+from src.components.ordering import build_purchase_list
+from src.pcb.netclasses import (
+    describe_netclasses,
+    netclass_assignments,
+    width_shortfalls,
+)
 from src.simulation.ngspice import simulate_circuit, SimulationResult
 from src.routing.freerouting import route_kicad_pcb, RoutingResult
 from src.llm.integration import NLToCircuitPipeline, create_nl_pipeline
@@ -41,6 +47,11 @@ class DesignRequest:
     # Ask an optional MCP server (kicad-mcp-server) for an independent ERC/DRC
     # opinion on the generated project. Off by default: it needs `mcp-setup`.
     mcp_validate: bool = False
+    # How many boards are being built. Quantities in the purchase list scale with
+    # this, and the distributor's own minimums and attrition are applied.
+    boards: int = 1
+    # Extra parts allowance as a fraction, e.g. 0.1 for 10% spares.
+    spare_fraction: float = 0.0
 
 
 @dataclass
@@ -52,6 +63,9 @@ class DesignSummary:
     routing_result: Optional[RoutingResult]
     generated_files: Dict[str, Path]
     bom: List[Dict[str, Any]]
+    # The BOM turned into something orderable: LCSC part numbers, stock, prices
+    # at the quantity being ordered, and the quantities to actually buy.
+    purchase_list: Optional[Any] = None
     # Provenance: whether the design came from an LLM or the deterministic
     # template generator, and any substitution/inference notes.
     used_llm: bool = True
@@ -67,12 +81,17 @@ class DesignSummary:
             "erc_report": self.erc_report.to_dict(),
             "generated_files": {k: str(v) for k, v in self.generated_files.items()},
             "bom": self.bom,
+            "total_cost": round(
+                sum(item.get("total_price", 0.0) or 0.0 for item in self.bom), 4
+            ),
             "used_llm": self.used_llm,
             "topology": self.topology,
             "design_notes": self.design_notes,
         }
         if self.validation is not None:
             result["validation"] = self.validation
+        if self.purchase_list is not None:
+            result["purchase_list"] = self.purchase_list.to_dict()
         if self.mcp_validation is not None:
             result["mcp_validation"] = self.mcp_validation
         if self.spice_result:
@@ -88,6 +107,8 @@ class DesignSummary:
             result["routing_result"] = {
                 "success": self.routing_result.success,
                 "routed_pcb": str(self.routing_result.routed_ses_path) if self.routing_result.routed_ses_path else None,
+                "routed_widths": dict(self.routing_result.routed_widths),
+                "width_warnings": list(self.routing_result.width_warnings),
             }
         return result
 
@@ -189,14 +210,57 @@ class AIDesignOrchestrator:
                 # Add routed PCB to generated files
                 if routing_result.routed_ses_path and routing_result.routed_ses_path.exists():
                     generated_files["pcb_routed"] = routing_result.routed_ses_path
+
+                # Check the router delivered the widths the net classes asked
+                # for. A router may narrow a trace where the wider one does not
+                # fit, and a narrower trace carries less current than the design
+                # was checked against.
+                assignments = netclass_assignments(
+                    circuit_ir.nets.values(),
+                    getattr(circuit_ir, "power_domains", None),
+                )
+                routing_result.width_warnings = width_shortfalls(
+                    routing_result.routed_widths, assignments
+                )
+                for rationale in describe_netclasses(assignments):
+                    print(f"   ℹ️  {rationale}")
+                for warning in routing_result.width_warnings:
+                    print(f"   ⚠️  {warning}")
+                if routing_result.routed_widths and not routing_result.width_warnings:
+                    print(
+                        "   ✅ Every routed net meets its net class width"
+                    )
             else:
                 print(f"   ⚠️  PCB auto-routing failed: {routing_result.error}")
 
-        # Step 6: Generate Bill of Materials (BOM)
+        # Step 6: Generate Bill of Materials (BOM) and the purchase list.
         print("\n📦 Step 6: Generating Bill of Materials...")
         bom = self._generate_bom(circuit_ir)
         total_cost = sum(item["total_price"] for item in bom)
         print(f"   ✅ BOM generated: {len(bom)} unique parts, ~${total_cost:.2f} estimated")
+
+        boards = max(int(getattr(request, "boards", 1) or 1), 1)
+        spare_fraction = max(float(getattr(request, "spare_fraction", 0.0) or 0.0), 0.0)
+        purchase_list = build_purchase_list(
+            circuit_ir, self.db, boards=boards, spare_fraction=spare_fraction
+        )
+        try:
+            bom_csv_path = output_dir / f"{request.project_name}-bom.csv"
+            bom_csv_path.write_text(purchase_list.to_jlcpcb_csv(), encoding="utf-8")
+            purchase_md_path = output_dir / f"{request.project_name}-purchase-list.md"
+            purchase_md_path.write_text(purchase_list.to_markdown(), encoding="utf-8")
+            generated_files["bom_csv"] = bom_csv_path
+            generated_files["purchase_list"] = purchase_md_path
+            orderable = len(purchase_list.orderable_lines)
+            print(
+                f"   ✅ Purchase list: {orderable}/{len(purchase_list.lines)} lines "
+                f"orderable, {purchase_list.total_parts} parts, "
+                f"~${purchase_list.total_cost:.2f} for {boards} board(s)"
+            )
+            for warning in purchase_list.warnings():
+                print(f"   ⚠️  {warning}")
+        except OSError as exc:
+            print(f"   ⚠️  Could not write the purchase list: {exc}")
 
         # Step 7: Export 3D glTF for visualization
         print("\n🎨 Step 7: Exporting 3D glTF for visualization...")
@@ -229,6 +293,7 @@ class AIDesignOrchestrator:
             routing_result=routing_result,
             generated_files=generated_files,
             bom=bom,
+            purchase_list=purchase_list,
             used_llm=getattr(specification, "used_llm", True),
             topology=getattr(specification, "topology", "") or "",
             design_notes=list(getattr(specification, "warnings", []) or []),
@@ -344,6 +409,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.REGULATOR_LDO,
                 footprint=ldo_spec.footprint,
                 symbol=ldo_spec.symbol,
+                package=ldo_spec.package,
                 mpn=ldo_spec.mpn,
                 manufacturer=ldo_spec.manufacturer,
                 description=ldo_spec.description,
@@ -360,6 +426,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.CAPACITOR,
                 footprint=c_in_spec.footprint,
                 symbol=c_in_spec.symbol,
+                package=c_in_spec.package,
                 mpn=c_in_spec.mpn,
             )
             c1.add_pin("1", "1", PinType.PASSIVE)
@@ -373,6 +440,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.CAPACITOR,
                 footprint=c_out_spec.footprint,
                 symbol=c_out_spec.symbol,
+                package=c_out_spec.package,
                 mpn=c_out_spec.mpn,
             )
             c2.add_pin("1", "1", PinType.PASSIVE)
@@ -386,6 +454,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.LED,
                 footprint=led_spec.footprint,
                 symbol=led_spec.symbol,
+                package=led_spec.package,
                 mpn=led_spec.mpn,
             )
             d1.add_pin("1", "K", PinType.PASSIVE)
@@ -398,6 +467,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.RESISTOR,
                 footprint=res_spec.footprint,
                 symbol=res_spec.symbol,
+                package=res_spec.package,
                 mpn=res_spec.mpn,
             )
             r1.add_pin("1", "1", PinType.PASSIVE)
@@ -441,6 +511,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.RESISTOR,
                 footprint=r_spec.footprint,
                 symbol=r_spec.symbol,
+                package=r_spec.package,
                 mpn=r_spec.mpn,
             )
             r1.add_pin("1", "1", PinType.PASSIVE)
@@ -453,6 +524,7 @@ class AIDesignOrchestrator:
                 component_type=ComponentType.LED,
                 footprint=led_spec.footprint,
                 symbol=led_spec.symbol,
+                package=led_spec.package,
                 mpn=led_spec.mpn,
             )
             d1.add_pin("1", "K", PinType.PASSIVE)

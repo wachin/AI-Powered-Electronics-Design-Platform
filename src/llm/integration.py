@@ -390,11 +390,11 @@ class CircuitSpecificationGenerator:
         "ldo_regulator": {
             "topology": "LDO Linear Regulator",
             "components": [
-                {"role": "regulator", "mpn": "AMS1117-3.3", "manufacturer": "AMS", "value": "3.3V", "package": "SOT-223", "reasoning": "LDO regulator 5V to 3.3V, 1A"},
-                {"role": "input_capacitor", "mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Input decoupling capacitor"},
-                {"role": "output_capacitor", "mpn": "CC0805KRX7R9BB106", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Output stability capacitor"},
-                {"role": "led_indicator", "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805", "reasoning": "Power-on indicator LED"},
-                {"role": "led_resistor", "mpn": "RC0805FR-0710KL", "manufacturer": "Yageo", "value": "10k", "package": "0805", "reasoning": "LED current limiting resistor"}
+                {"role": "regulator", "mpn": "", "lcsc": "", "value": "3.3V", "package": "SOT-223", "reasoning": "LDO regulator 5V to 3.3V, 1A"},
+                {"role": "input_capacitor", "mpn": "", "lcsc": "", "value": "10uF", "package": "0805", "reasoning": "Input decoupling capacitor"},
+                {"role": "output_capacitor", "mpn": "", "lcsc": "", "value": "10uF", "package": "0805", "reasoning": "Output stability capacitor"},
+                {"role": "led_indicator", "mpn": "", "lcsc": "", "value": "Green", "package": "0805", "reasoning": "Power-on indicator LED"},
+                {"role": "led_resistor", "mpn": "", "lcsc": "", "value": "10k", "package": "0805", "reasoning": "LED current limiting resistor"}
             ],
             "connections": [
                 {"from": "U1", "to": "C1", "net": "VIN"},
@@ -412,11 +412,11 @@ class CircuitSpecificationGenerator:
         "buck_converter": {
             "topology": "Asynchronous Buck Converter",
             "components": [
-                {"role": "controller", "mpn": "LM2596S-5.0", "manufacturer": "TI", "value": "5V", "package": "TO-220-5", "reasoning": "Buck converter controller"},
-                {"role": "inductor", "mpn": "SRR1280-470M", "manufacturer": "Bourns", "value": "47uH", "package": "12x12mm", "reasoning": "Buck inductor"},
-                {"role": "input_capacitor", "mpn": "C-10uF-0805", "manufacturer": "Yageo", "value": "10uF", "package": "0805", "reasoning": "Input decoupling"},
-                {"role": "output_capacitor", "mpn": "C-100uF-1206", "manufacturer": "Yageo", "value": "100uF", "package": "1206", "reasoning": "Output filtering"},
-                {"role": "freewheel_diode", "mpn": "SS34", "manufacturer": "Vishay", "value": "3A/40V", "package": "SMA", "reasoning": "Freewheeling diode"}
+                {"role": "controller", "mpn": "", "lcsc": "", "value": "5V", "package": "TO-220-5", "reasoning": "Buck converter controller"},
+                {"role": "inductor", "mpn": "", "lcsc": "", "value": "47uH", "package": "12x12mm", "reasoning": "Buck inductor"},
+                {"role": "input_capacitor", "mpn": "", "lcsc": "", "value": "10uF", "package": "0805", "reasoning": "Input decoupling"},
+                {"role": "output_capacitor", "mpn": "", "lcsc": "", "value": "100uF", "package": "1206", "reasoning": "Output filtering"},
+                {"role": "freewheel_diode", "mpn": "", "lcsc": "", "value": "3A/40V", "package": "SMA", "reasoning": "Freewheeling diode"}
             ],
             "connections": [
                 {"from": "U1", "to": "L1", "net": "SW"},
@@ -431,8 +431,8 @@ class CircuitSpecificationGenerator:
         "led_driver": {
             "topology": "Series Resistor LED Driver",
             "components": [
-                {"role": "led", "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "value": "Green", "package": "0805", "reasoning": "Green indicator LED"},
-                {"role": "current_limit_resistor", "mpn": "RC0805FR-071K5L", "manufacturer": "Yageo", "value": "1.5k", "package": "0805", "reasoning": "Current limiting resistor for 20mA"}
+                {"role": "led", "mpn": "", "lcsc": "", "value": "Green", "package": "0805", "reasoning": "Green indicator LED"},
+                {"role": "current_limit_resistor", "mpn": "", "lcsc": "", "value": "1.5k", "package": "0805", "reasoning": "Current limiting resistor for 20mA"}
             ],
             "connections": [
                 {"from": "VIN", "to": "R1", "net": "VIN"},
@@ -446,39 +446,39 @@ class CircuitSpecificationGenerator:
         "phono_preamp": {
             "topology": "Stereo RIAA Phono Preamplifier (Moving Magnet)",
             "components": [
-                {"role": "input_jack_left", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA input"},
-                {"role": "input_capacitor_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Left input DC blocking capacitor"},
-                {"role": "input_resistor_left", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
-                {"role": "riaa_r1_left", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
-                {"role": "riaa_c1_left", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
-                {"role": "riaa_r2_left", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
-                {"role": "riaa_c2_left", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
-                {"role": "riaa_r3_left", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
-                {"role": "riaa_c3_left", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
-                {"role": "gain_rf_left", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
-                {"role": "output_capacitor_left", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "Left output DC blocking capacitor"},
-                {"role": "output_jack_left", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA output"},
-                {"role": "input_jack_right", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA input"},
-                {"role": "input_capacitor_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Right input DC blocking capacitor"},
-                {"role": "input_resistor_right", "mpn": "RC0603FR-0747KL", "manufacturer": "Yageo", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
-                {"role": "riaa_r1_right", "mpn": "RC0603FR-073K3L", "manufacturer": "Yageo", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
-                {"role": "riaa_c1_right", "mpn": "C0603C473K5RAC", "manufacturer": "KEMET", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
-                {"role": "riaa_r2_right", "mpn": "RC0603FR-07750RL", "manufacturer": "Yageo", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
-                {"role": "riaa_c2_right", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
-                {"role": "riaa_r3_right", "mpn": "RC0603FR-071K2L", "manufacturer": "Yageo", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
-                {"role": "riaa_c3_right", "mpn": "C0603C223K5RAC", "manufacturer": "KEMET", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
-                {"role": "gain_rf_right", "mpn": "RC0603FR-071ML", "manufacturer": "Yageo", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
-                {"role": "output_capacitor_right", "mpn": "C0603C105K5RAC", "manufacturer": "KEMET", "value": "1uF", "package": "0603", "reasoning": "Right output DC blocking capacitor"},
-                {"role": "output_jack_right", "mpn": "RCA-2P", "manufacturer": "CUI Devices", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA output"},
-                {"role": "opamp", "mpn": "OPA2134PA", "manufacturer": "TI", "value": "OPA2134", "package": "DIP-8", "reasoning": "Dual low-noise audio op-amp, one unit per channel"},
-                {"role": "psu_cap_large", "mpn": "EEU-FC1E470", "manufacturer": "Panasonic", "value": "470uF/25V", "package": "Radial", "reasoning": "Supply bulk filtering capacitor"},
-                {"role": "psu_cap_small", "mpn": "C0603C104K5RAC", "manufacturer": "KEMET", "value": "100nF", "package": "0603", "reasoning": "Op-amp supply bypass capacitor"},
-                {"role": "regulator_adj_resistor", "mpn": "RC0603FR-07240RL", "manufacturer": "Yageo", "value": "240", "package": "0603", "reasoning": "LM317 adjustment resistor"},
-                {"role": "regulator_pos", "mpn": "LM317L", "manufacturer": "TI", "value": "Adjustable", "package": "TO-92", "reasoning": "Positive 15V rail regulator"},
-                {"role": "regulator_neg_adj", "mpn": "RC0603FR-07240RL", "manufacturer": "Yageo", "value": "240", "package": "0603", "reasoning": "LM337 adjustment resistor"},
-                {"role": "dc_jack", "mpn": "PJ-002AH", "manufacturer": "CUI Devices", "value": "DC Jack", "package": "PTH", "reasoning": "12V DC input jack"},
-                {"role": "power_switch", "mpn": "GT21MCBE", "manufacturer": "C&K", "value": "DPDT", "package": "PTH", "reasoning": "Power on/off switch"},
-                {"role": "battery_clip", "mpn": "9V_CLIP", "manufacturer": "Keystone", "value": "9V Battery Clip", "package": "PTH", "reasoning": "Optional 9V battery input"},
+                {"role": "input_jack_left", "mpn": "", "lcsc": "", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA input"},
+                {"role": "input_capacitor_left", "mpn": "", "lcsc": "", "value": "100nF", "package": "0603", "reasoning": "Left input DC blocking capacitor"},
+                {"role": "input_resistor_left", "mpn": "", "lcsc": "", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
+                {"role": "riaa_r1_left", "mpn": "", "lcsc": "", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
+                {"role": "riaa_c1_left", "mpn": "", "lcsc": "", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
+                {"role": "riaa_r2_left", "mpn": "", "lcsc": "", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
+                {"role": "riaa_c2_left", "mpn": "", "lcsc": "", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
+                {"role": "riaa_r3_left", "mpn": "", "lcsc": "", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
+                {"role": "riaa_c3_left", "mpn": "", "lcsc": "", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
+                {"role": "gain_rf_left", "mpn": "", "lcsc": "", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
+                {"role": "output_capacitor_left", "mpn": "", "lcsc": "", "value": "1uF", "package": "0603", "reasoning": "Left output DC blocking capacitor"},
+                {"role": "output_jack_left", "mpn": "", "lcsc": "", "value": "RCA Jack", "package": "PTH", "reasoning": "Left channel RCA output"},
+                {"role": "input_jack_right", "mpn": "", "lcsc": "", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA input"},
+                {"role": "input_capacitor_right", "mpn": "", "lcsc": "", "value": "100nF", "package": "0603", "reasoning": "Right input DC blocking capacitor"},
+                {"role": "input_resistor_right", "mpn": "", "lcsc": "", "value": "47k", "package": "0603", "reasoning": "Moving-magnet cartridge load resistor"},
+                {"role": "riaa_r1_right", "mpn": "", "lcsc": "", "value": "3.3k", "package": "0603", "reasoning": "RIAA 3180us network resistor"},
+                {"role": "riaa_c1_right", "mpn": "", "lcsc": "", "value": "47nF", "package": "0603", "reasoning": "RIAA 3180us network capacitor"},
+                {"role": "riaa_r2_right", "mpn": "", "lcsc": "", "value": "750", "package": "0603", "reasoning": "RIAA 318us network resistor"},
+                {"role": "riaa_c2_right", "mpn": "", "lcsc": "", "value": "100nF", "package": "0603", "reasoning": "RIAA 318us network capacitor"},
+                {"role": "riaa_r3_right", "mpn": "", "lcsc": "", "value": "1.2k", "package": "0603", "reasoning": "RIAA 75us network resistor"},
+                {"role": "riaa_c3_right", "mpn": "", "lcsc": "", "value": "22nF", "package": "0603", "reasoning": "RIAA 75us network capacitor"},
+                {"role": "gain_rf_right", "mpn": "", "lcsc": "", "value": "1M", "package": "0603", "reasoning": "Feedback resistor, approximately 40dB gain"},
+                {"role": "output_capacitor_right", "mpn": "", "lcsc": "", "value": "1uF", "package": "0603", "reasoning": "Right output DC blocking capacitor"},
+                {"role": "output_jack_right", "mpn": "", "lcsc": "", "value": "RCA Jack", "package": "PTH", "reasoning": "Right channel RCA output"},
+                {"role": "opamp", "mpn": "", "lcsc": "", "value": "OPA2134", "package": "DIP-8", "reasoning": "Dual low-noise audio op-amp, one unit per channel"},
+                {"role": "psu_cap_large", "mpn": "", "lcsc": "", "value": "470uF/25V", "package": "Radial", "reasoning": "Supply bulk filtering capacitor"},
+                {"role": "psu_cap_small", "mpn": "", "lcsc": "", "value": "100nF", "package": "0603", "reasoning": "Op-amp supply bypass capacitor"},
+                {"role": "regulator_adj_resistor", "mpn": "", "lcsc": "", "value": "240", "package": "0603", "reasoning": "LM317 adjustment resistor"},
+                {"role": "regulator_pos", "mpn": "", "lcsc": "", "value": "Adjustable", "package": "TO-92", "reasoning": "Positive 15V rail regulator"},
+                {"role": "regulator_neg_adj", "mpn": "", "lcsc": "", "value": "240", "package": "0603", "reasoning": "LM337 adjustment resistor"},
+                {"role": "dc_jack", "mpn": "", "lcsc": "", "value": "DC Jack", "package": "PTH", "reasoning": "12V DC input jack"},
+                {"role": "power_switch", "mpn": "", "lcsc": "", "value": "DPDT", "package": "PTH", "reasoning": "Power on/off switch"},
+                {"role": "battery_clip", "mpn": "", "lcsc": "", "value": "9V Battery Clip", "package": "PTH", "reasoning": "Optional 9V battery input"},
             ],
             "connections": [
                 {"from": "input_jack_left.1", "to": "input_capacitor_left.1", "net": "L_IN"},
@@ -550,12 +550,18 @@ class CircuitSpecificationGenerator:
                     "properties": {
                         "role": {"type": "string"},
                         "mpn": {"type": "string"},
+                        "lcsc": {"type": "string"},
                         "manufacturer": {"type": "string"},
                         "value": {"type": "string"},
                         "package": {"type": "string"},
                         "reasoning": {"type": "string"},
                     },
-                    "required": ["role", "mpn", "value", "package"]
+                    # `mpn` is deliberately not required. Requiring it forced the
+                    # model to produce a part number whether or not it knew a
+                    # real one, and the invented numbers then looked exactly like
+                    # orderable parts. An empty mpn is the honest answer: the
+                    # platform resolves a real part from the value and package.
+                    "required": ["role", "value", "package"]
                 }
             },
             "connections": {
@@ -808,9 +814,19 @@ class CircuitSpecificationGenerator:
             "specification as JSON.\n\n"
             "Requirements for your answer:\n"
             "- topology: a short topology name, e.g. \"LDO Linear Regulator\".\n"
-            "- components: every part needed, each with role, mpn, manufacturer, "
-            "value, package, and reasoning. Use only real manufacturer part "
-            "numbers, and prefer the catalog parts listed below.\n"
+            "- components: every part needed, each with role, value, package and "
+            "reasoning.\n"
+            "  * value and package are what identify a part. Give them as "
+            "concretely as you can (\"10k\" with \"0603\", not \"resistor\").\n"
+            "  * mpn and lcsc are optional. Fill them in ONLY by copying a part "
+            "verbatim from the catalog list below. If you do not have a catalog "
+            "part that fits, set both to an empty string: the platform will find "
+            "a real, in-stock part for the value and package you asked for.\n"
+            "  * Never write a part number from memory. A number that looks real "
+            "but is not in a distributor's catalogue cannot be ordered, and the "
+            "mistake is only discovered after the boards are designed.\n"
+            "  * The examples below have empty mpn for exactly this reason: they "
+            "show the shape of the answer, not part numbers to copy.\n"
             "- connections: every electrical connection, each as "
             "{\"from\": \"<ref>.<pin>\", \"to\": \"<ref>.<pin>\", \"net\": \"<NET>\"}. "
             "Use the reference designators you assigned (U1, C1, R1, D1, ...). "
@@ -822,7 +838,9 @@ class CircuitSpecificationGenerator:
             "- Every regulator or IC needs input and output decoupling capacitors.\n"
             "- Every LED needs a series current-limiting resistor.\n"
             "- Every net must have at least two pin connections.\n"
-            "- Do not invent pin numbers or part numbers.\n"
+            "- Do not invent pin numbers.\n"
+            "- Do not invent part numbers: an empty mpn is always better than a "
+            "guessed one.\n"
             f"{catalog_hint}\n"
             f"Example for {requirements.circuit_type}:\n{example_text}"
         )
@@ -884,35 +902,60 @@ class CircuitSpecificationGenerator:
         return json.dumps(trimmed, separators=(",", ":"))
 
     def _catalog_hint(self, requirements: CircuitRequirement) -> str:
-        """Render a short list of real catalog parts to ground the model."""
+        """
+        Render a short list of real catalog parts that actually fit the request.
+
+        Only parts relevant to the requirement are listed. An earlier version
+        listed the four highest-stock parts of each category, which for a 3.3 V
+        regulator request offered five-volt regulators — a hint that invites the
+        wrong answer is worse than no hint. Passives are deliberately not listed:
+        their value and package are enough for the platform to find a real part,
+        and a list of unrelated 0402 capacitors is only noise.
+        """
         if self.db is None:
             return ""
-        wanted = {
-            "ldo_regulator": ["regulator_ldo"],
-            "buck_converter": ["regulator_buck"],
-            "boost_converter": ["regulator_boost"],
-            "led_driver": ["led", "resistor"],
-        }.get(requirements.circuit_type, [])
+
+        category = {
+            "ldo_regulator": "regulator_ldo",
+            "buck_converter": "regulator_buck",
+            "boost_converter": "regulator_boost",
+        }.get(requirements.circuit_type)
 
         lines: List[str] = []
-        for category in wanted + ["capacitor", "resistor"]:
+        if category:
+            wanted_voltage = requirements.output_voltage
+            query = f"{wanted_voltage}v" if wanted_voltage else ""
             try:
-                parts = self.db.search(category=category, limit=4)
+                parts = self.db.search(
+                    query=query, category=category, min_stock=1000, limit=6
+                )
             except Exception:
                 parts = []
             for part in parts:
+                if not part.lcsc_part:
+                    # No LCSC number means a built-in placeholder, not something
+                    # that can be ordered. Offering it here is how invented part
+                    # numbers spread into designs.
+                    continue
                 lines.append(
-                    f"- {part.mpn} ({part.manufacturer}) {part.value} "
-                    f"{part.package} [{part.category}]"
+                    f"- mpn={part.mpn} lcsc={part.lcsc_part} "
+                    f"({part.manufacturer}) value={part.value} "
+                    f"package={part.package} stock={part.stock}"
                 )
 
         if not lines:
-            return ""
-        unique = list(dict.fromkeys(lines))[:16]
+            return (
+                "\nNo component catalogue is available, so no part numbers can be "
+                "verified. Leave mpn and lcsc empty for every component: give "
+                "value and package, and the platform will find a real part."
+            )
+
         return (
-            "\nPrefer these real catalog parts where they fit "
-            "(you may use other real MPNs when they do not):\n"
-            + "\n".join(unique)
+            "\nThese parts are real, in stock and match what was asked for. Copy "
+            "mpn and lcsc together, exactly as written, if one of them fits; "
+            "otherwise leave both empty. For resistors, capacitors and "
+            "inductors, leave mpn and lcsc empty and just give value and "
+            "package:\n" + "\n".join(lines)
         )
 
     def _compact_render(self, spec_dict: Optional[Dict[str, Any]]) -> str:
@@ -922,9 +965,8 @@ class CircuitSpecificationGenerator:
         parts = []
         for comp in spec_dict.get("components", []) or []:
             if isinstance(comp, dict):
-                parts.append(
-                    f"{comp.get('role', '?')}={comp.get('mpn', '?')}"
-                )
+                identifier = comp.get("lcsc") or comp.get("mpn") or "?"
+                parts.append(f"{comp.get('role', '?')}={identifier}")
         return ", ".join(parts)
 
     async def _generate_with_llm(self, requirements: CircuitRequirement) -> CircuitSpecification:

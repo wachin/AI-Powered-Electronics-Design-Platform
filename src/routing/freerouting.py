@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 import json
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
 
@@ -32,6 +32,12 @@ class RoutingResult:
     routed_ses_path: Optional[Path] = None
     routed_pcb_path: Optional[Path] = None
     drc_errors: int = 0
+    # The narrowest track the router actually laid on each net, in millimetres.
+    # Read back from the routed board so the design can check it got the widths
+    # its net classes asked for, rather than assuming it did.
+    routed_widths: Dict[str, float] = field(default_factory=dict)
+    # Nets laid narrower than their net class requires.
+    width_warnings: List[str] = field(default_factory=list)
     stdout: str = ""
     stderr: str = ""
     error: Optional[str] = None
@@ -118,6 +124,10 @@ class FreeRoutingRunner:
             routed_ses_path=routed_ses_path,
             routed_pcb_path=routed_pcb_path,
             drc_errors=0,
+            # Carried through from the import step, which reads them back off the
+            # routed board. Dropping them here is how the widths the router
+            # actually used would go unreported.
+            routed_widths=dict(import_result.routed_widths),
             stdout=f"routed board: {routed_pcb_path} ({tracks} tracks)",
         )
 
@@ -239,12 +249,21 @@ class FreeRoutingRunner:
                 success=False, error=f"routed SES file is missing: {ses_path}"
             )
         code = (
-            "import pcbnew\n"
+            "import json, pcbnew\n"
             f"board = pcbnew.LoadBoard({str(source_pcb)!r})\n"
             f"ok = pcbnew.ImportSpecctraSES(board, {str(ses_path)!r})\n"
+            "widths = {}\n"
             "if ok:\n"
             f"    board.Save({str(pcb_output)!r})\n"
+            "    for item in board.GetTracks():\n"
+            "        if item.Type() == pcbnew.PCB_VIA_T:\n"
+            "            continue\n"
+            "        net = item.GetNetname() or ''\n"
+            "        width = item.GetWidth() / 1e6\n"
+            "        if net and (net not in widths or width < widths[net]):\n"
+            "            widths[net] = round(width, 4)\n"
             "print('OK' if ok else 'FAILED')\n"
+            "print('WIDTHS ' + json.dumps(widths))\n"
         )
         try:
             result = self._pcbnew(code)
@@ -261,7 +280,23 @@ class FreeRoutingRunner:
                     f"{(result.stderr or result.stdout or '').strip()[:400]}"
                 ),
             )
-        return RoutingResult(success=True)
+
+        widths: Dict[str, float] = {}
+        for line in (result.stdout or "").splitlines():
+            if not line.startswith("WIDTHS "):
+                continue
+            try:
+                parsed = json.loads(line[len("WIDTHS "):])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(parsed, dict):
+                widths = {
+                    str(net): float(value)
+                    for net, value in parsed.items()
+                    if isinstance(value, (int, float))
+                }
+
+        return RoutingResult(success=True, routed_widths=widths)
 
 
 def route_kicad_pcb(pcb_path: Path, freerouting_jar: Optional[str] = None) -> RoutingResult:

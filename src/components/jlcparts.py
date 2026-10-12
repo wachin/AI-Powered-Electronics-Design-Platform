@@ -435,8 +435,12 @@ class JLCPart:
             if key in package_lower:
                 return val
 
-        # Default fallback
-        return f"Package_SMD:{package.upper()}"
+        # No mapping. Returning a fabricated footprint name would look like a
+        # real KiCad identifier and then fail, or worse, resolve by accident. An
+        # empty footprint is an honest "the generator must resolve this itself",
+        # and src/generators/kicad_footprints.py does exactly that from the
+        # package name.
+        return ""
 
     def _category_to_symbol(self, category: str) -> str:
         """Map category to KiCad symbol library path."""
@@ -977,6 +981,35 @@ class JLCPartsDatabase:
             query, package=package, min_stock=min_stock, category=category,
             limit=limit, sort=sort,
         ).parts
+
+    def lookup_mpn(self, mpn: str) -> List[JLCPart]:
+        """
+        Find every catalogue part with this exact manufacturer part number.
+
+        The same MPN is sold under several LCSC numbers — different packages,
+        different stock, different prices — so all of them are returned, best
+        stock first, and the caller decides.
+
+        This is a separate query from :meth:`search` because a text search ranks
+        by stock and then checks whether the first hit happens to match, which
+        misses the part whenever a near-match outsells it. "AMS1117-3.3" is in
+        the catalogue six times, and the fuzzy path returned none of them.
+        """
+        if not self.available or not mpn:
+            return []
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM jlc_components "
+                    "WHERE mfr = ? COLLATE NOCASE "
+                    "ORDER BY preferred DESC, stock DESC",
+                    (mpn.strip(),),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            logger.warning("Catalog MPN lookup failed for %r: %s", mpn, exc)
+            return []
+        return [self._row_to_part(row) for row in rows]
 
     def search_explained(
         self,
