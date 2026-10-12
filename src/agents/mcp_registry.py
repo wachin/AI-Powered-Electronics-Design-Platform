@@ -55,8 +55,8 @@ def freerouting_jar_candidates() -> List[Path]:
     Places a FreeRouting jar may live, most preferred first.
 
     FreeRouting is not bundled with any Python package, so it is either supplied
-    by the user (``KICAD_MCP_FREEROUTING_JAR``), kept in this project's cache
-    directory, or found in the reference checkout when one is present.
+    by the user (``KICAD_MCP_FREEROUTING_JAR``) or kept in this project's
+    ``libs/freerouting/`` directory.
     """
     import os
 
@@ -67,8 +67,6 @@ def freerouting_jar_candidates() -> List[Path]:
     candidates += [
         REPO_ROOT / "libs" / "freerouting" / "freerouting.jar",
         Path.home() / ".local" / "share" / "freerouting" / "freerouting.jar",
-        EXTERNAL_DIR / "freerouting" / "scripts" / "benchmark" / "binaries"
-        / "freerouting-current.jar",
     ]
     return candidates
 
@@ -154,7 +152,6 @@ def find_pcbnew_python() -> Optional[Path]:
         if probe.returncode == 0:
             return path
     return None
-EXTERNAL_DIR = REPO_ROOT / "external"
 # Per-server environments live outside version control.
 MCP_ENV_ROOT = REPO_ROOT / ".mcp_envs"
 
@@ -367,7 +364,6 @@ def status() -> List[Dict[str, object]]:
 
 
 __all__ = [
-    "EXTERNAL_DIR",
     "FREEROUTING_JAR_ENV",
     "FREEROUTING_JAVA_ENV",
     "find_freerouting_jar",

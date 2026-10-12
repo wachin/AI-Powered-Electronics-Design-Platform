@@ -4,44 +4,67 @@
 
 ## Purpose
 
-The `external/` directory contains Git submodules with open-source projects that are being studied as **technical references** for the development of this project.
+This project was built by studying existing open-source EDA software. Those
+projects are **technical references**, and they are listed in
+`research/reference-repositories.md` with what each was used for.
 
-These repositories are included so that AI agents and developers can inspect their:
+They are **not part of this repository and are not submodules**. Cloning this
+project downloads only this project. That is deliberate: a developer should not
+have to fetch gigabytes of research material to build, test or run the platform.
 
-* source code
-* architecture
-* algorithms
-* APIs
-* data structures
-* file formats
-* protocols
-* integration techniques
-* tests
-* documentation
-* build systems
-* implementation approaches
+An agent may inspect a reference repository to understand how a problem has been
+solved elsewhere. To read one:
 
-The purpose is to learn from existing open-source projects and avoid unnecessarily reinventing functionality that already exists in the ecosystem.
+```bash
+git clone --depth 1 https://github.com/yaqwsx/jlcparts /tmp/refs/jlcparts
+```
+
+`research/repository_catalog.md` records the full evaluation: repositories
+considered, licences, maintenance status and the conclusion reached for each.
 
 ---
 
-## IMPORTANT: `external/` is NOT a library directory
-
-The `external/` directory must **not** be treated as the project's library, dependency, vendor, or source-code directory.
+## IMPORTANT: a reference repository is NOT a library directory
 
 Do not:
 
-* copy source files from `external/` into the main project
-* import Python/TypeScript/C++/Java/etc. modules directly from `external/`
-* add `external/` directories to application import paths
-* modify external repositories to implement project functionality
-* build the application by depending directly on arbitrary files inside `external/`
-* create application code that assumes a particular external repository is present
-* silently convert an external repository into a runtime dependency
-* copy-paste large portions of external source code
-* mix project source code with external repository source code
+* copy source files from a reference repository into this project
+* import modules directly from a reference checkout
+* add a reference checkout to application import paths
+* modify a reference repository to implement project functionality
+* build the application by depending on files inside a reference checkout
+* create application code that assumes a particular reference repository is
+  present
+* silently convert a reference repository into a runtime dependency
+* copy-paste large portions of reference source code
+* mix project source code with reference source code
 
-The presence of a repository inside `external/` does not mean that the project has adopted that repository as a dependency.
+The presence of a project in `research/reference-repositories.md` does **not**
+mean this project has adopted it as a dependency.
+
+---
+
+## Where third-party code is allowed to live
+
+| Kind | Location | How it arrives |
+|---|---|---|
+| Python dependencies | `venv/` | `pip install -e ".[dev]"` — declared in `pyproject.toml` |
+| MCP servers | `.mcp_envs/<name>/` | `mcp-setup` — declared in `pyproject.toml` (PyPI or `git+https://`) |
+| Non-Python binaries | `libs/` | downloaded by the user, e.g. the FreeRouting jar |
+| Reference repositories | anywhere outside the tree, e.g. `/tmp/refs/` | `git clone` — optional, never required |
+
+**Rules:**
+
+* never check an installable dependency into the source tree — declare it in
+  `pyproject.toml`, on PyPI or as a `git+https://` URL;
+* never require a research repository to be present for the build, tests or
+  runtime;
+* `libs/` is only for binary artifacts that genuinely cannot be installed.
+  Vendored source belongs there only if the code is modified and cannot be
+  published upstream — and that decision must be documented.
+
+`tests/test_mcp_integration.py` enforces the first rule for the MCP servers: no
+installable component may point at a local checkout.
 
 ---
 
@@ -64,7 +87,7 @@ Flux.ai is a proprietary commercial product. Before any commercial distribution:
 - Flux.ai logos, UI designs, or trademarks
 - Claims like "Flux.ai clone" or "open-source Flux"
 
-**SAFE REFENCES:**
+**SAFE REFERENCES:**
 - "inspired by Flux.ai"
 - "similar architecture to commercial EDA platforms"
 - Pure technical analysis
@@ -85,49 +108,7 @@ When implementing features similar to Flux.ai:
 
 ---
 
-## External repositories are references only
-
-Every repository under `external/` should initially be considered:
-
-> **REFERENCE ONLY**
-
-An agent may inspect the repository to understand how a problem has been solved elsewhere.
-
-For example, an agent may study:
-
-* how KiCad represents a schematic
-* how Circuit JSON represents a circuit
-* how tscircuit converts Circuit JSON to KiCad
-* how SKiDL generates netlists
-* how atopile represents hardware constraints
-* how kicad-tools parses KiCad files
-* how KiCad MCP servers expose tools to AI agents
-* how FreeRouting performs PCB routing
-* how ngspice performs simulation
-* how Yjs implements collaborative editing
-* how component databases model electronic parts
-
-The agent must not assume that the external implementation should be copied or directly integrated.
-
----
-
-## No modifications to external repositories
-
-Do not make changes inside a submodule under `external/` unless the user explicitly requests a separate experiment involving that repository.
-
-In particular:
-
-* do not edit files inside `external/`
-* do not commit changes to an external repository
-* do not create project-specific patches inside external repositories
-* do not change their dependencies
-* do not change their build configuration
-
-If an experiment requires modifying an external project, create a separate experimental branch, fork, patch, or temporary working copy outside the normal project workflow.
-
----
-
-## Do not depend on external repositories accidentally
+## Do not depend on a reference project accidentally
 
 Before introducing functionality into the main project, determine whether it should be:
 
@@ -139,15 +120,17 @@ Before introducing functionality into the main project, determine whether it sho
 6. used through a subprocess;
 7. adopted as a formal project dependency.
 
-Do not make this decision merely because a repository exists under `external/`.
+Do not make this decision merely because a repository appears in the reference
+list.
 
-The architecture must remain understandable and reproducible without requiring every research repository to be present.
+The architecture must remain understandable and reproducible without requiring
+any research repository to be present.
 
 ---
 
 ## Research before integration
 
-Before proposing an external repository as a real dependency, investigate:
+Before proposing an external project as a real dependency, investigate:
 
 * current maintenance status
 * license
@@ -165,17 +148,12 @@ Before proposing an external repository as a real dependency, investigate:
 * whether the project is experimental or production-ready
 * whether the required functionality is actually implemented
 
-Do not infer capabilities solely from the repository name, README title, GitHub stars, or marketing claims.
+Do not infer capabilities solely from the repository name, README title, GitHub
+stars, or marketing claims.
 
-When possible, verify important capabilities by inspecting:
-
-* source code
-* tests
-* examples
-* official documentation
-* releases
-* issue tracker
-* API definitions
+When possible, verify important capabilities by inspecting source code, tests,
+examples, official documentation, releases, the issue tracker and API
+definitions.
 
 ---
 
@@ -195,7 +173,8 @@ Record at minimum:
 
 Do not assume that two open-source licenses are automatically compatible.
 
-This project must not incorporate code from an external repository merely because the repository is publicly available.
+This project must not incorporate code from another repository merely because
+the repository is publicly available. See `CREDITS.md` for the current inventory.
 
 ---
 
@@ -205,25 +184,15 @@ There is a strict distinction between:
 
 ### Reference
 
-The project is studied to understand an implementation.
-
-Example:
-
-```text
-external/kicad-tools/
-```
-
-An agent can inspect its parser, routing algorithms, DRC implementation, etc.
-
-This does NOT make `kicad-tools` a project dependency.
+The project is studied to understand an implementation. For example, studying
+how `kicad-tools` parses a schematic does **not** make it a dependency.
 
 ### Dependency
 
 The project is deliberately selected as part of the application's architecture.
 
-A dependency must be explicitly documented in the project's dependency configuration and architecture documentation.
-
-For example:
+A dependency must be explicitly documented in the project's dependency
+configuration and architecture documentation:
 
 ```text
 pyproject.toml
@@ -232,15 +201,15 @@ Dockerfile
 requirements.txt
 ```
 
-or another appropriate dependency mechanism.
-
-Moving a project from "reference" to "dependency" requires an explicit architectural decision.
+Moving a project from "reference" to "dependency" requires an explicit
+architectural decision.
 
 ---
 
 ## Do not duplicate existing functionality without research
 
-Before implementing a significant subsystem, search the repositories under `external/` and the project's research documentation.
+Before implementing a significant subsystem, search the project's research
+documentation and the reference repositories list.
 
 Examples:
 
@@ -257,7 +226,8 @@ Examples:
 * collaboration
 * MCP integration
 
-If an existing open-source implementation appears relevant, document it before writing a new implementation.
+If an existing open-source implementation appears relevant, document it before
+writing a new implementation.
 
 The goal is not to avoid writing code.
 
@@ -276,47 +246,22 @@ src/
 research/
     Research reports, comparisons, experiments, technical notes
 
-external/
-    Reference repositories only
+libs/
+    Third-party binaries only (e.g. the FreeRouting jar); never project code
 
 tests/
     Project tests
 
 docs/
     Project documentation
+
+external/  (does not exist)
+    Was a submodule checkout of reference projects. Removed; do not recreate it
+    as a dependency mechanism.
 ```
 
-An agent must never assume that code found under `external/` is part of the project's source tree.
-
----
-
-## Git submodules
-
-Repositories in `external/` are managed as Git submodules.
-
-Do not:
-
-* delete `.gitmodules`
-* replace submodules with copied source trees
-* commit modifications to submodule contents
-* change a submodule's remote without explicit authorization
-* recursively initialize unrelated repositories
-
-To initialize the research repositories:
-
-```bash
-git submodule update --init --recursive
-```
-
-To update them intentionally:
-
-```bash
-git submodule update --remote --merge
-```
-
-Updates should be deliberate because research results may depend on a specific version or commit.
-
-When a research report depends on a particular version, record the evaluated commit or version in the research documentation.
+An agent must never treat code from a reference checkout as part of this
+project's source tree.
 
 ---
 
@@ -347,11 +292,14 @@ Evidence: <file/path>
 Status: Verified
 ```
 
+When a research report depends on a particular version, record the evaluated
+commit or version in the research documentation.
+
 ---
 
 ## Security
 
-External repositories are untrusted until reviewed.
+Reference repositories are untrusted until reviewed.
 
 Do not automatically execute:
 
@@ -363,11 +311,11 @@ Do not automatically execute:
 * Python programs
 * package lifecycle scripts
 
-simply because they exist in an external repository.
+merely because they are listed as references or exist locally.
 
 AI agents must inspect code and documentation before executing unfamiliar external software.
 
-Particular care is required for repositories that process:
+Particular care is required for software that processes:
 
 * KiCad project files
 * datasheets
@@ -386,20 +334,16 @@ The project should follow this principle:
 
 > Study existing open-source software first. Reuse mature capabilities where appropriate. Build only what is genuinely missing.
 
-The `external/` directory exists to make that research practical.
+Installing a published package is preferred over vendoring.
 
-It does not exist to become a dumping ground for libraries.
+Vendoring is preferred over reimplementing.
 
-It does not exist to become a vendor directory.
-
-It does not exist to become an alternative package manager.
-
-It exists strictly as a **reference library for technical research**.
+Reimplementing is a last resort, and must be justified in `research/`.
 
 ---
 
 ## Final rule
 
-If there is uncertainty about whether an external repository should become a dependency, **do not integrate it automatically**.
+If there is uncertainty about whether an external project should become a dependency, **do not integrate it automatically**.
 
-Document the repository and the uncertainty in `research/`, then make an explicit architectural decision.
+Document the project and the uncertainty in `research/`, then make an explicit architectural decision.

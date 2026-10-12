@@ -72,16 +72,24 @@ class TestRegistry:
         # It must not point into the reference checkout.
         assert spec.source_dir is None
 
-    def test_no_server_installs_from_the_reference_checkout(self):
-        """`external/` is reference-only: nothing installable may live there."""
-        from src.agents.mcp_registry import EXTERNAL_DIR
+    def test_no_server_installs_from_a_local_checkout(self):
+        """
+        Installable code must be declared as a package or a git URL.
 
+        The project must not require anyone to clone a research repository in
+        order to install its dependencies.
+        """
+        project_root = Path(__file__).resolve().parents[1]
         for spec in REGISTRY.values():
             assert spec.source_dir is None, (
-                f"{spec.key} installs from external/, which is reference-only"
+                f"{spec.key} installs from a local checkout; declare it as a "
+                "package or git URL instead"
             )
             for requirement in spec.install:
-                assert str(EXTERNAL_DIR) not in requirement
+                assert str(project_root) not in requirement
+                assert not requirement.startswith((".", "/")), (
+                    f"{spec.key} uses a local path: {requirement}"
+                )
 
     def test_pcbnew_interpreter_is_discovered_or_absent(self):
         """The lookup must return a real path, or None -- never raise."""

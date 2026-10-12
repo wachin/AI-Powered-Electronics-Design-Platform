@@ -284,7 +284,7 @@ Output and verification:
 - Component database (`src/components/database.py`, `jlcparts.py`)
 - Orchestrator, FastAPI backend, CLI (`src/agents/orchestrator.py`, `src/api/main.py`, `src/cli.py`)
 
-### 🔧 Used as  programs (not linked)
+### 🔧 Used as external programs (not linked)
 
 - **KiCad** (`kicad-cli`) — netlist export, ERC, DRC, Gerber/drill export.
   Note: **no DSN export or SES import** — those `kicad-cli` subcommands do not
@@ -295,15 +295,20 @@ Output and verification:
 - **FreeRouting** — PCB autorouter (Java JAR). Not currently runnable; see Known Limitations.
 - **yaqwsx/jlcparts** — offline component catalog (MIT, SQLite).
 
-### 📦  references (in `/`, reference only)
+### 📦 Research references (not part of this repository)
 
-32 Git submodules are available for study — none are imported, linked, or
-required. Highlights: `kicad`, `kicad-tools`, `kicad-mcp-server`, `circuit-json`,
-`tscircuit`, `skidl`, `atopile`, `circuit-synth`, `freerouting`, `ngspice`,
-`pyspice`, `yjs`, `automerge`, `jlcparts`, `librepcb`, `ecad-viewer`.
+The project was built by studying open-source EDA software. Those repositories
+are **not** submodules and are **not** downloaded when you clone this project.
+They are listed in [`research/reference-repositories.md`](research/reference-repositories.md)
+with their licences and what each was used for.
 
-See `research/repository_catalog.md` for the full list with licenses, and
-`AGENTS.md` for the reference-only policy.
+Clone only what you want to read:
+
+```bash
+git clone --depth 1 https://github.com/yaqwsx/jlcparts /tmp/refs/jlcparts
+```
+
+`research/repository_catalog.md` holds the full evaluation.
 
 ---
 
@@ -499,16 +504,14 @@ kicad-cli --version
 ngspice --version
 ```
 
-The `/` submodules are **not** installed and are **not** dependencies.
-Do not `pip install -e /...`: those repositories exist only to be read,
-and installing them risks version conflicts (for example `kicad-mcp-server` and
-`pcbparts-mcp` require mutually exclusive versions of `mcp`). See `AGENTS.md`.
+Nothing is installed from a research checkout: installable code is declared in `pyproject.toml` instead of being
+cloned here, and why the MCP servers get their own isolated environments —
+`kicad-mcp-server` and `pcbparts-mcp` require mutually exclusive versions of
+`mcp`. See `AGENTS.md`.
 
-If you want them present for reading:
-
-```bash
-git submodule update --init --recursive   # optional, reference material only
-```
+If you want any of them for reading, clone it on demand — see
+[`research/reference-repositories.md`](research/reference-repositories.md).
+Nothing needs to be present for the build, the tests or the runtime.
 
 ---
 
@@ -528,6 +531,69 @@ ai-electronics-design mcp-setup --server kicad          # or just one
 # Then ask for the extra validation during generation
 ai-electronics-design -p "Design a 5V to 3.3V LDO regulator" --mcp-validate
 ```
+
+### Installation
+
+Nothing needs to be cloned. Both servers are declared in `pyproject.toml` and
+installed into their own isolated environments by one command:
+
+```bash
+ai-electronics-design mcp-setup            # creates .mcp_envs/<name>/ for each
+ai-electronics-design mcp-status           # confirm they are ready
+```
+
+That is the complete installation procedure. It installs:
+
+| Server | Source | Why not a clone |
+|---|---|---|
+| `kicad-mcp-server` | PyPI (`kicad-mcp-server>=3.5.0`) | Published package |
+| `pcbparts-mcp` | git URL (`git+https://github.com/Averyy/pcbparts-mcp.git`) | Not on PyPI, but pip installs directly from the URL |
+
+Both are **optional**. Design generation, ERC, DRC, Gerbers and auto-routing all
+work without them.
+
+### Why this is optional (and what you lose without it)
+
+The platform does not use MCP servers to *build* anything. They are a second,
+independent opinion on a design that has already been built. That is why they are
+optional:
+
+| Task | Built in (no MCP needed) | What MCP adds |
+|---|---|---|
+| Understand the request | LLM pipeline | — |
+| Choose real parts | Component database | Cross-distributor search, alternatives |
+| Build the circuit | Circuit IR builder | — |
+| Electrical rules | ERC, 6 rules | Same check via a different implementation |
+| Design rules | `kicad-cli pcb drc` | DRC through KiCad's Python API |
+| Schematic and PCB | Deterministic generators | Board statistics, netlist/SPICE export |
+| Gerbers and drill files | `kicad-cli` | `export_jlcpcb` packaging |
+| Auto-routing | `src/routing/freerouting.py` | `auto_route` inside the server |
+| SPICE | ngspice | — |
+| 3D output | glTF exporter | STEP export, 3D renders |
+
+So a full design — schematic, PCB, ERC-clean, auto-routed, Gerbers, BOM, 3D — is
+produced with no MCP server installed. Verified by running the pipeline with the
+server environments renamed away.
+
+What you gain by installing them:
+
+* **An independent check.** `--mcp-validate` asks the KiCad MCP server to run ERC
+  and DRC. It shares no code with our own checks, so agreement is meaningful and
+  disagreement is a signal worth investigating.
+* **Capabilities we do not implement**: part alternatives across JLCPCB/Mouser/
+  DigiKey, curated PCB design rules, reference-board schematics, STEP/3D renders
+  and JLCPCB packaging.
+
+If they are not installed, they fail safely:
+
+```text
+🔎 Step 8: Independent validation via MCP server...
+   ⚠️  MCP validation skipped: MCP server 'kicad' is not set up.
+       Run: ai-electronics-design mcp-setup
+```
+
+The design is still generated and delivered. A missing MCP server is a skipped
+extra check, never a failed build.
 
 ### Why each server gets its own virtual environment
 
@@ -713,38 +779,119 @@ python -c "import src; print('Python imports OK')"
 
 ---
 
-##  Submodules (Reference Only)
+## Installation, in one place
 
-The `external/` directory contains Git submodules for reference only. They are **not required** for the main platform to function:
-
-32 submodules are configured in `.gitmodules`, for example:
-
-```
-external/
-├── kicad/                  # KiCad source
-├── kicad-tools/            # KiCad automation utilities
-├── kicad-mcp-server/       # MCP server for KiCad
-├── circuit-json/           # Circuit JSON format and tooling
-├── tscircuit/              # Circuit JSON → PCB toolchain
-├── skidl/                  # Netlist generation from Python
-├── atopile/                # Hardware description language
-├── freerouting/            # Autorouter source
-├── ngspice/  pyspice/      # SPICE simulators
-├── yjs/  automerge/        # CRDT libraries
-├── jlcparts/               # Component catalog generator
-├── librepcb/  ecad-viewer/ # Alternative EDA tools
-└── ...                     # (see research/repository_catalog.md)
-```
-
-
-The main platform does **not** require any of them. Initialise only if you want
-to study them:
+There are only **two** things to install, and neither is a clone:
 
 ```bash
-git submodule update --init --recursive
+# 1. The platform and its Python dependencies
+pip install -e ".[dev]"
+
+# 2. Optional: the MCP servers, in their own isolated environments
+ai-electronics-design mcp-setup
+
+# Verify
+pytest -q                              # 234 tests
+ai-electronics-design mcp-status       # optional servers
 ```
 
-Submodules are reference material, never dependencies — see `AGENTS.md`.
+Plus two system packages, which are not Python and cannot come from pip:
+
+```bash
+sudo apt install kicad ngspice         # ngspice is optional (simulation)
+```
+
+For auto-routing only: a Java 25 runtime (`sudo apt install openjdk-25-jdk`) and
+the FreeRouting jar in `libs/freerouting/` — see `libs/freerouting/README.md`.
+
+### Everything else is a reference you never install
+
+The `external/` directory that used to hold 32 Git submodules **no longer
+exists**. Cloning this project downloads only this project.
+
+The five repositories below appear in the research notes because their approach
+was studied. **Do not install them**: the code never imports them, and the table
+says what this project uses instead.
+
+| Repository | Install? | What replaced it |
+|---|---|---|
+| [kicad-to-circuit-json](https://github.com/tscircuit/kicad-to-circuit-json) | **No** | KiCad parsing is done here: `src/generators/kicad_symbols.py`, `kicad_footprints.py` |
+| [circuit-json-to-kicad](https://github.com/tscircuit/circuit-json-to-kicad) | **No** | KiCad is emitted directly: `src/generators/kicad_generator.py` |
+| [tscircuit-core](https://github.com/tscircuit/tscircuit) | **No** | This project has its own Circuit IR (`src/core/circuit_ir.py`) |
+| [automerge](https://github.com/automerge/automerge) | **No** | Collaboration uses Yjs instead |
+| [skidl](https://github.com/devbisme/skidl) | **No** | Own ERC and Circuit IR (`src/core/erc.py`) |
+
+To read any of them, clone outside the project tree:
+
+```bash
+git clone --depth 1 https://github.com/devbisme/skidl /tmp/refs/skidl
+```
+
+Full list with licences:
+[`research/reference-repositories.md`](research/reference-repositories.md).
+
+### Verified: a clean environment needs nothing else
+
+A fresh virtual environment with only the declared dependencies passes the whole
+suite (234 tests) and produces a fully routed design. No research repository, and
+no undeclared package, is required.
+
+---
+
+
+
+The project's research notes list many repositories that were **read**, not
+adopted. None of the following should be installed — the table says what
+replaced each one:
+
+| Repository | Install it? | Why |
+|---|---|---|
+| [kicad-to-circuit-json](https://github.com/tscircuit/kicad-to-circuit-json) | **No** | Studied for KiCad parsing; this project parses KiCad itself (`src/generators/kicad_symbols.py`, `kicad_footprints.py`) |
+| [circuit-json-to-kicad](https://github.com/tscircuit/circuit-json-to-kicad) | **No** | Studied for conversion approach; this project emits KiCad S-expressions directly (`src/generators/kicad_generator.py`) |
+| [tscircuit-core](https://github.com/tscircuit/tscircuit) | **No** | React-based schematic authoring; not used. This project has its own Circuit IR |
+| [automerge](https://github.com/automerge/automerge) | **No** | Alternative CRDT, not adopted. Collaboration uses Yjs |
+| [skidl](https://github.com/devbisme/skidl) | **No** | Studied for netlist/ERC concepts; this project has its own ERC (`src/core/erc.py`) and Circuit IR |
+
+Installing these would add dependencies the code never imports and can introduce
+version conflicts. To read any of them, clone outside the project:
+
+```bash
+git clone --depth 1 https://github.com/devbisme/skidl /tmp/refs/skidl
+```
+
+The full list with licences is in
+[`research/reference-repositories.md`](research/reference-repositories.md).
+
+---
+
+## Where everything lives
+
+A developer who clones this repository downloads **only this repository**. There
+are no submodules, so nothing extra is fetched.
+
+| What | Where it goes | How it arrives | Required? |
+|---|---|---|---|
+| Python dependencies | `venv/` | `pip install -e ".[dev]"` — declared in `pyproject.toml` | Yes |
+| MCP servers | `.mcp_envs/<name>/` (isolated) | `ai-electronics-design mcp-setup` — declared in `pyproject.toml` | Optional |
+| FreeRouting jar | `libs/freerouting/` | you download it (see the README there) | Only for auto-routing |
+| KiCad and its libraries | system | `apt install kicad` | Yes |
+| ngspice | system | `apt install ngspice` | Optional (simulation) |
+| Research references | outside the repo, e.g. `/tmp/refs/` | `git clone --depth 1 <url>` | Never |
+
+### Installing vs. browsing
+
+These are kept deliberately apart, because mixing them is what forces every
+developer to download gigabytes they will never open:
+
+* **Installable code is declared as a dependency** and installed by a tool. This
+  includes the MCP servers: `kicad-mcp-server` from PyPI, and `pcbparts-mcp`
+  from its git URL.
+* **Code you only want to read is never cloned into this repository.** It is
+  listed in `research/reference-repositories.md` with a clone command. Reading
+  someone's parser does not make it a dependency.
+
+`tests/test_mcp_integration.py` enforces this: no installable component may point
+at a local checkout.
 
 ---
 
@@ -847,14 +994,11 @@ AI-Powered-Electronics-Design-Platform/
 │   └── tsconfig.json               # TypeScript config
 ├── api_output/                      # Runtime output (gitignored)
 │   └── <job_id>/                   # Per-job KiCad project files
-├── external/                        # 32 Git submodules (reference only)
-│   ├── kicad/ kicad-tools/          # KiCad source + automation
-│   ├── circuit-json/ tscircuit/     # Circuit JSON toolchain
-│   ├── freerouting/ ngspice/        # Autorouter + simulator source
-│   ├── jlcparts/                    # Component catalog generator
-│   └── ...                          # see research/repository_catalog.md
+├── libs/
+│   └── freerouting/                 # Downloaded jar only (gitignored)
 └── research/
     ├── flux-ai-patent-search.md
+    ├── reference-repositories.md    # Optional references + clone commands
     └── repository_catalog.md
 ```
 
