@@ -14,7 +14,13 @@ def test_component_db_search():
 
     results = db.search("AMS1117")
     assert len(results) >= 1
-    assert results[0].mpn == "AMS1117-3.3"
+    # Every result is an AMS1117 variant. Which variant comes first depends on
+    # the catalogue — a Preferred part outranks a bigger-stock one, because
+    # Preferred parts avoid JLCPCB's extended-part handling — so the ordering is
+    # asserted as a property, not as one part number.
+    assert all("AMS1117" in part.mpn.upper() for part in results)
+    if any(part.is_preferred for part in results):
+        assert results[0].is_preferred
 
     ldos = db.search(category="regulator_ldo")
     assert len(ldos) >= 1
@@ -139,3 +145,44 @@ class TestCatalogDownload:
 
         # Constructing the database must pick up the explicit path.
         assert JLCPartsDatabase()._find_catalog() == catalog
+
+
+class TestBuiltinLookup:
+    """
+    Template circuits pick their parts from the curated built-in list.
+
+    The distinction matters: a curated part has a symbol and pinout the rest of
+    the pipeline has been checked against, while "whichever catalog part ranks
+    first" does not. An earlier version of the orchestrator used the latter and
+    silently put a 100 nF capacitor where a 10 µF input capacitor was intended.
+    """
+
+    def test_finds_a_builtin_part_by_value(self):
+        db = ComponentDatabase()
+        part = db.find_builtin("capacitor", value="10uF")
+        assert part is not None
+        assert part.value == "10uF"
+        assert part.mpn == "CC0805KRX7R9BB106"
+
+    def test_a_builtin_part_has_no_lcsc_number(self):
+        """Which is how a caller can tell it came from the built-in list."""
+        db = ComponentDatabase()
+        part = db.find_builtin("resistor", value="330")
+        assert part is not None
+        assert part.lcsc_part is None
+
+    def test_package_narrows_the_match(self):
+        db = ComponentDatabase()
+        assert db.find_builtin("resistor", value="10k", package="0402").mpn == (
+            "RC0402FR-0710KL"
+        )
+
+    def test_a_value_that_is_not_there_returns_none(self):
+        """Returning a different value instead would be worse than returning nothing."""
+        db = ComponentDatabase()
+        assert db.find_builtin("capacitor", value="47uF") is None
+        assert db.find_builtin("resistor", value="4k7") is None
+
+    def test_an_unknown_category_returns_none(self):
+        db = ComponentDatabase()
+        assert db.find_builtin("nonexistent_category") is None

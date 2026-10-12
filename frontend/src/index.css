@@ -87,3 +87,345 @@ input:focus, textarea:focus, select:focus {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--fg-muted);
 }
+/* ---------------------------------------------------------------------------
+   Component search
+
+   The catalog is a table of numbers, so the styling keeps rows dense and
+   monospaced where values line up, and gives the search's interpretation its
+   own strip above the results: what the search understood must be as visible
+   as what it returned.
+--------------------------------------------------------------------------- */
+
+.component-search {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.search-header h1 {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.search-header p {
+  color: var(--fg-secondary);
+  font-size: 14px;
+  margin-bottom: 20px;
+  max-width: 80ch;
+}
+
+.search-header code {
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.search-form {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.search-input-group {
+  position: relative;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+}
+
+.search-input-group input {
+  flex: 1;
+  padding-left: 38px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+
+.search-btn {
+  background: var(--accent);
+  color: #04231d;
+  padding: 0 20px;
+  font-weight: 600;
+}
+
+.search-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.search-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--fg-secondary);
+  padding: 0 16px;
+}
+
+.filter-toggle:hover {
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+.filters-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-field label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+}
+
+.results-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--fg-secondary);
+  padding: 8px 0;
+}
+
+.data-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+}
+
+.search-interpretation {
+  background: var(--accent-bg);
+  border: 1px solid rgba(0, 212, 170, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.search-interpretation ul {
+  margin: 6px 0 0 18px;
+  color: var(--fg-secondary);
+}
+
+.results-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.results-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.results-table td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.results-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.expand-btn {
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 2px;
+  display: flex;
+}
+
+.category-badge {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.badge-preferred,
+.badge-basic {
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.badge-preferred {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 170, 0.4);
+}
+
+.badge-basic {
+  background: rgba(255, 217, 61, 0.12);
+  color: var(--warning);
+  border: 1px solid rgba(255, 217, 61, 0.35);
+}
+
+.substitute-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--fg-secondary);
+  padding: 5px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.substitute-btn:hover:not(:disabled) {
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.expanded-content {
+  background: var(--bg-secondary);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px 20px;
+  font-size: 13px;
+}
+
+.spec-list table {
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.spec-list td {
+  border: none;
+  padding: 2px 16px 2px 0;
+  color: var(--fg-secondary);
+}
+
+.substitute-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.substitute {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--card-bg);
+}
+
+.substitute-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.substitute-head .ok {
+  color: var(--accent);
+}
+
+.substitute-head .warn {
+  color: var(--warning);
+}
+
+.reasons {
+  list-style: none;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.reasons .reason::before {
+  content: '+ ';
+  color: var(--accent);
+}
+
+.reasons .caveat::before {
+  content: '! ';
+  color: var(--warning);
+}
+
+.reasons .caveat {
+  color: var(--warning);
+}
+
+.substitute-warning,
+.substitute-notes {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: var(--fg-muted);
+}

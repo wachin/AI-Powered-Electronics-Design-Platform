@@ -4,14 +4,16 @@ FastAPI Backend for AI-Powered Electronics Design Platform.
 Exposes the design orchestrator as a REST API for web frontend integration.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
+from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
 import asyncio
 import json
+import threading
 from datetime import datetime
 
 from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest, DesignSummary
@@ -19,10 +21,33 @@ from src.components.database import ComponentDatabase
 from src.collaboration.server import router as collaboration_router, handle_collaboration_websocket
 
 
+# In-memory job storage (use Redis/DB in production)
+jobs: Dict[str, Dict[str, Any]] = {}
+
+# Global instances
+db = ComponentDatabase()
+orchestrator = AIDesignOrchestrator(db=db)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """
+    Parse the component catalog in the background as the API starts.
+
+    Building the parametric index takes a few seconds for 180,000 parts, so
+    doing it here keeps that cost off the first user-visible search. A daemon
+    thread is used so that a failure to build — or a missing catalog — cannot
+    stop the API from serving requests; the search simply falls back.
+    """
+    threading.Thread(target=db.warm, name="catalog-warm", daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title="AI Electronics Design Platform API",
     description="REST API for AI-powered electronics design: natural language → KiCad project",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS for frontend development
@@ -33,13 +58,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# In-memory job storage (use Redis/DB in production)
-jobs: Dict[str, Dict[str, Any]] = {}
-
-# Global instances
-db = ComponentDatabase()
-orchestrator = AIDesignOrchestrator(db=db)
 
 
 class DesignRequestModel(BaseModel):
@@ -67,11 +85,19 @@ class JobStatusModel(BaseModel):
 
 
 class ComponentSearchModel(BaseModel):
-    query: str = Field(default="", description="Free-text search")
+    query: str = Field(
+        default="",
+        description=(
+            "Query. Values are matched numerically: '10k 0603' returns 10 kΩ "
+            "parts, not 110 kΩ; '100nF 50V' matches the 50 V rating as a "
+            "minimum. Names such as 'esp32' fall back to a text search."
+        ),
+    )
     category: Optional[str] = Field(default=None, description="Category filter")
     package: Optional[str] = Field(default=None, description="Package filter")
     min_stock: int = Field(default=0, description="Minimum stock")
     limit: int = Field(default=50, description="Max results")
+    sort: str = Field(default="stock", description="stock | price | value")
 
 
 class ComponentResultModel(BaseModel):
@@ -90,6 +116,27 @@ class ComponentResultModel(BaseModel):
     is_preferred: bool = False
     datasheet_url: str = ""
     product_url: str = ""
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    # The distributor's own ordering figures. `min_order` matters when a bill of
+    # materials is turned into an order: it is not always 1.
+    min_order: int = 1
+    attrition: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ComponentSearchResponseModel(BaseModel):
+    """
+    Search results together with how the query was interpreted.
+
+    The interpretation is returned because a parametric search that silently
+    understood the wrong thing is worse than one that returns nothing: the user
+    sees "10k, package 0603" and can tell immediately if that is not what they
+    asked for.
+    """
+
+    components: List[ComponentResultModel]
+    notes: List[str] = Field(default_factory=list)
+    interpretation: str = ""
+    source: str = ""
 
 
 @app.get("/")
@@ -103,6 +150,7 @@ async def root():
             "jobs": "/api/jobs/{job_id}",
             "components": "/api/components/search",
             "categories": "/api/components/categories",
+            "substitutes": "/api/components/{lcsc}/substitutes",
         },
     }
 
@@ -206,23 +254,91 @@ async def list_jobs():
     return {"jobs": [JobStatusModel(**j) for j in jobs.values()]}
 
 
-@app.post("/api/components/search", response_model=List[ComponentResultModel])
+@app.post("/api/components/search", response_model=ComponentSearchResponseModel)
 async def search_components(request: ComponentSearchModel):
-    """Search component database."""
-    results = db.search(
+    """
+    Search the component catalog.
+
+    Returns the interpretation alongside the results so the UI can show what the
+    search understood rather than presenting an unexplained list.
+    """
+    outcome = db.search_explained(
         query=request.query,
         category=request.category,
         package=request.package,
         min_stock=request.min_stock,
         limit=request.limit,
+        sort=request.sort,
     )
-    return [ComponentResultModel(**r.to_dict()) for r in results]
+    return ComponentSearchResponseModel(
+        components=[ComponentResultModel(**c) for c in outcome["components"]],
+        notes=outcome["notes"],
+        interpretation=outcome["interpretation"],
+        source=outcome["source"],
+    )
 
 
 @app.get("/api/components/categories")
 async def get_categories():
-    """Get available component categories."""
-    return {"categories": db.get_categories()}
+    """
+    Available component categories.
+
+    ``categories`` are the names search accepts, with their part counts;
+    ``catalog_categories`` are the catalogue's own broader category names, shown
+    for reference.
+    """
+    return {
+        "categories": db.get_categories(),
+        "category_counts": db.internal_category_counts(),
+        "catalog_categories": db.catalog_category_counts(),
+    }
+
+
+@app.post("/api/components/warm")
+async def warm_component_index():
+    """
+    Build the parametric index ahead of the first search.
+
+    Building it takes a few seconds for 180,000 parts; doing it here means the
+    first real search is fast. Called on startup by the API itself.
+    """
+    return {"indexed": db.warm()}
+
+
+@app.get("/api/components/{lcsc}/substitutes")
+async def get_substitutes(
+    lcsc: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    min_stock: Optional[int] = Query(default=None, ge=0),
+    same_package: bool = Query(default=True),
+):
+    """
+    Parts that can replace the given part, with the checks that were made.
+
+    Each result carries ``reasons`` (what matched) and ``caveats`` (what
+    differs or could not be verified). An empty list means no numeric
+    comparison was possible, not that no part exists.
+    """
+    substitutes = db.find_substitutes(
+        lcsc, limit=limit, min_stock=min_stock, same_package=same_package
+    )
+    if not substitutes:
+        return {
+            "lcsc_part": lcsc,
+            "substitutes": [],
+            "notes": [
+                "No comparable part found. Either the catalog is not installed, "
+                "or the part has no numeric specification to compare on."
+            ],
+        }
+    return {
+        "lcsc_part": lcsc,
+        "substitutes": substitutes,
+        "notes": [
+            "A substitute is a candidate, not a guarantee: verify the "
+            "datasheet, particularly the pinout, before ordering."
+        ],
+    }
 
 
 @app.get("/api/components/{mpn}")

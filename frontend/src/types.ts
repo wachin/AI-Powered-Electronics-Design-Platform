@@ -145,6 +145,16 @@ export interface ComponentResult {
   is_preferred: boolean
   datasheet_url: string
   product_url: string
+  /**
+   * Parsed catalogue attributes in base SI units, e.g.
+   * `{ resistance: 10000, tolerance: 0.01, power: 0.1 }`.
+   * Only the fields the catalogue stated are present.
+   */
+  attributes?: Record<string, number | string>
+  /** Minimum quantity the distributor sells. Not always 1. */
+  min_order?: number
+  /** The distributor's own attrition figures, kept verbatim. */
+  attrition?: Record<string, unknown>
 }
 
 export interface ComponentSearchRequest {
@@ -153,6 +163,37 @@ export interface ComponentSearchRequest {
   package?: string
   min_stock?: number
   limit?: number
+  sort?: 'stock' | 'price' | 'value'
+}
+
+/**
+ * Search results with the interpretation that produced them.
+ *
+ * `notes` and `interpretation` exist so the UI can show what the search
+ * understood. A parametric search that silently misunderstood the query is
+ * worse than one that returns nothing.
+ */
+export interface ComponentSearchResponse {
+  components: ComponentResult[]
+  notes: string[]
+  interpretation: string
+  source: string
+}
+
+/** A candidate replacement, with the evidence for and against it. */
+export interface Substitute extends ComponentResult {
+  /** Properties that were checked and matched. */
+  reasons: string[]
+  /** Differences, or properties that could not be verified. */
+  caveats: string[]
+  /** True when every comparable property matched or was verified. */
+  verified: boolean
+}
+
+export interface SubstituteResponse {
+  lcsc_part: string
+  substitutes: Substitute[]
+  notes: string[]
 }
 
 // Collaboration types

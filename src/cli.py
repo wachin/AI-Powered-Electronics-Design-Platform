@@ -15,6 +15,11 @@ that an installed copy exposes a working console command:
     ai-electronics-design catalog-status
     ai-electronics-design catalog-setup
 
+    # Part selection against that catalog
+    ai-electronics-design parts-search "10k 0603"
+    ai-electronics-design parts-search "100nF 50V 0805" --min-stock 5000
+    ai-electronics-design parts-substitute C18212698
+
 The root-level `main.py` is a thin shim that calls :func:`main` here, so both
 invocation styles behave identically.
 """
@@ -32,7 +37,14 @@ from src.components.database import ComponentDatabase
 
 
 
-SUBCOMMANDS = ("mcp-status", "mcp-setup", "catalog-status", "catalog-setup")
+SUBCOMMANDS = (
+    "mcp-status",
+    "mcp-setup",
+    "catalog-status",
+    "catalog-setup",
+    "parts-search",
+    "parts-substitute",
+)
 
 
 def _run_mcp_status() -> int:
@@ -123,6 +135,149 @@ def _run_catalog_setup(force: bool, verbose: bool, dest: str | None = None) -> i
     print()
     print(f"Installed at: {path}")
     print("Check it with: ai-electronics-design catalog-status")
+    return 0
+
+
+def _run_parts_search(
+    query: str,
+    package: str | None,
+    category: str | None,
+    min_stock: int,
+    limit: int,
+    sort: str,
+) -> int:
+    """
+    Search the component catalog from the terminal.
+
+    Values are matched numerically, so ``10k 0603`` returns 10 kΩ parts and not
+    110 kΩ ones. The interpretation is printed above the results, so what the
+    search understood is always visible.
+    """
+    from src.components.database import ComponentDatabase
+
+    db = ComponentDatabase()
+    if not db.using_jlcparts:
+        print(
+            "The full component catalog is not installed, so this search would\n"
+            "only cover the built-in list of common parts.\n"
+            "Download it with: ai-electronics-design catalog-setup",
+            file=sys.stderr,
+        )
+
+    outcome = db.search_explained(
+        query=query, category=category, package=package,
+        min_stock=min_stock, limit=limit, sort=sort,
+    )
+
+    print(f"Query      : {query!r}")
+    print(f"Understood : {outcome['interpretation']}")
+    for note in outcome["notes"]:
+        print(f"Note       : {note}")
+    print(f"Source     : {outcome['source']}")
+    print()
+
+    components = outcome["components"]
+    if not components:
+        print("No matching parts.")
+        return 0
+
+    print(
+        f"{'':>3} {'LCSC':<10} {'MPN':<26} {'Package':<14} "
+        f"{'Specification':<30} {'Stock':>9}  {'Unit':>8}"
+    )
+    for index, entry in enumerate(components, start=1):
+        flags = []
+        if entry.get("is_preferred"):
+            flags.append("preferred")
+        if entry.get("is_basic"):
+            flags.append("basic")
+        flag_text = f"  [{', '.join(flags)}]" if flags else ""
+        price = entry.get("price") or 0
+        print(
+            f"{index:>3}. {entry['lcsc_part'] or '-':<10} "
+            f"{(entry['mpn'] or '-')[:26]:<26} "
+            f"{(entry['package'] or '-')[:14]:<14} "
+            f"{(entry['value'] or '-')[:30]:<30} "
+            f"{entry['stock']:>9,}  "
+            f"{(f'{price:.4f}' if price else '-'):>8}{flag_text}"
+        )
+
+    print()
+    if db.using_jlcparts:
+        print("Prices are JLCPCB quantity-tier prices and exclude assembly fees.")
+    else:
+        print("These are built-in placeholder parts: stock and prices are")
+        print("indicative only, not distributor data.")
+    print("Verify stock and specifications before ordering.")
+    return 0
+
+
+def _run_parts_substitute(
+    lcsc_part: str,
+    limit: int,
+    min_stock: int | None,
+    same_package: bool,
+) -> int:
+    """
+    Find parts that can replace a given part, with the evidence for each.
+
+    Every candidate is listed with what was checked and matched (``+``) and with
+    what differs or could not be verified (``!``). A candidate is never silently
+    presented as equivalent.
+    """
+    from src.components.database import ComponentDatabase
+
+    db = ComponentDatabase()
+    if not db.using_jlcparts:
+        print(
+            "Substitute lookup needs the full component catalog, because it\n"
+            "compares parsed specifications. Download it with:\n"
+            "  ai-electronics-design catalog-setup",
+            file=sys.stderr,
+        )
+        return 1
+
+    original = db.get_by_lcsc(lcsc_part)
+    if original is None:
+        print(f"{lcsc_part} is not in the component catalog.", file=sys.stderr)
+        return 1
+
+    print(f"Replacing: {original.lcsc_part} {original.mpn}")
+    print(f"  category : {original.category}")
+    print(f"  package  : {original.package}")
+    print(f"  value    : {original.value}")
+    print(f"  stock    : {original.stock:,}")
+    print()
+
+    substitutes = db.find_substitutes(
+        lcsc_part, limit=limit, min_stock=min_stock, same_package=same_package
+    )
+    if not substitutes:
+        print(
+            "No comparable part was found.\n"
+            "\n"
+            "This happens when the part has no numeric specification to match\n"
+            "on — a part identified only by a part number cannot be compared by\n"
+            "value. Check the part's datasheet and compare candidates by hand."
+        )
+        return 0
+
+    for index, substitute in enumerate(substitutes, start=1):
+        status = "all checks passed" if substitute["verified"] else "review caveats"
+        print(
+            f"{index}. {substitute['lcsc_part']} {substitute['mpn']} "
+            f"({substitute['package']}) — {status}"
+        )
+        print(f"   value : {substitute['value']}")
+        print(f"   stock : {substitute['stock']:,}  unit price: {substitute['price']:.4f}")
+        for reason in substitute["reasons"]:
+            print(f"   + {reason}")
+        for caveat in substitute["caveats"]:
+            print(f"   ! {caveat}")
+        print()
+
+    print("A substitute is a candidate, not a guarantee. Check the datasheet —")
+    print("in particular the pinout — before ordering.")
     return 0
 
 
@@ -340,6 +495,59 @@ def main(argv: list[str] | None = None) -> int:
             catalog.add_argument("-v", "--verbose", action="store_true")
             c_args = catalog.parse_args(rest)
             return _run_catalog_setup(c_args.force, c_args.verbose, c_args.dest)
+
+        if command == "parts-search":
+            parts = argparse.ArgumentParser(
+                prog="ai-electronics-design parts-search",
+                description=(
+                    "Search the component catalog. Values are matched "
+                    "numerically, so '10k 0603' does not return 110k parts."
+                ),
+            )
+            parts.add_argument("query", help='For example "10k 0603" or "100nF 50V 0805"')
+            parts.add_argument("--package", default=None, help="Package filter")
+            parts.add_argument("--category", default=None, help="Category filter")
+            parts.add_argument(
+                "--min-stock", type=int, default=0, help="Minimum stock (default 0)"
+            )
+            parts.add_argument("-n", "--limit", type=int, default=15)
+            parts.add_argument(
+                "--sort",
+                choices=["stock", "price", "value"],
+                default="stock",
+            )
+            p_args = parts.parse_args(rest)
+            return _run_parts_search(
+                p_args.query, p_args.package, p_args.category,
+                p_args.min_stock, p_args.limit, p_args.sort,
+            )
+
+        if command == "parts-substitute":
+            substitute = argparse.ArgumentParser(
+                prog="ai-electronics-design parts-substitute",
+                description=(
+                    "Find parts that can replace a given part, listing what was "
+                    "verified and what was not."
+                ),
+            )
+            substitute.add_argument("lcsc_part", help="LCSC number, e.g. C18212698")
+            substitute.add_argument("-n", "--limit", type=int, default=10)
+            substitute.add_argument(
+                "--min-stock",
+                type=int,
+                default=None,
+                help="Minimum stock (default: the original part's minimum order)",
+            )
+            substitute.add_argument(
+                "--any-package",
+                action="store_true",
+                help="Allow a different package (the footprint will not fit)",
+            )
+            s_args = substitute.parse_args(rest)
+            return _run_parts_substitute(
+                s_args.lcsc_part, s_args.limit, s_args.min_stock,
+                not s_args.any_package,
+            )
 
         sub = argparse.ArgumentParser(prog="ai-electronics-design mcp-setup")
         sub.add_argument(

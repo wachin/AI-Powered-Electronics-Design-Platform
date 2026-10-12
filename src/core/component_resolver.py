@@ -695,8 +695,45 @@ def resolve_mpn(
 
     # Try a category match, preferring the requested package and value.
     for category in _CATEGORY_KEYWORDS.get(component_type, ()):
+        # A curated part that matches the requested value and package exactly is
+        # the best answer available: its symbol and pinout have been checked
+        # against the rest of the pipeline. Searching the catalogue first would
+        # return whichever real part ranks highest, which for "10uF 0805" was a
+        # 0402 capacitor.
+        curated = None
+        if value:
+            try:
+                curated = database.find_builtin(
+                    category, value=value, package=package or None
+                )
+                if curated is None:
+                    curated = database.find_builtin(category, value=value)
+            except Exception:  # pragma: no cover - defensive against DB quirks
+                curated = None
+        if curated is not None:
+            return MPNResolution(
+                requested_mpn=requested_mpn,
+                resolved=curated,
+                substituted=True,
+                note=(
+                    f"MPN '{requested_mpn}' not in catalog; substituted "
+                    f"{curated.mpn} (curated part matching value and package)"
+                ),
+            )
+
+        # Otherwise search the catalogue *by value*, so the candidates are
+        # relevant rather than whatever the category happens to rank first.
+        # Searching for "Green" among LEDs only works if the value is passed
+        # through: a blind category scan returns an arbitrary colour.
         try:
-            candidates = database.search(category=category, limit=25)
+            candidates = database.search(
+                query=value or "",
+                category=category,
+                package=package or None,
+                limit=25,
+            )
+            if not candidates and value:
+                candidates = database.search(category=category, limit=25)
         except Exception:  # pragma: no cover - defensive against DB quirks
             candidates = []
         if not candidates:

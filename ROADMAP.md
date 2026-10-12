@@ -354,7 +354,46 @@ Explain the advantages and disadvantages.
 
 # 7. COMPONENT DATABASE
 
-- [x] **IMPLEMENTED** - JLCPCB/LCSC offline catalog (yaqwsx/jlcparts, 600k+ parts) with parametric search + built-in fallback
+- [x] **IMPLEMENTED** - JLCPCB/LCSC offline catalog (CDFER republish of
+  yaqwsx/jlcparts), 179,894 in-stock parts, with a built-in fallback catalog.
+- [x] **IMPLEMENTED** - Numeric parametric search over that catalog
+  (`src/components/parametric.py`). Values are parsed from the catalogue's JSON
+  attributes into numbers and matched as numbers, so `10k 0603` cannot return
+  110 kΩ. Ratings (`50V`, `1A`, `250mW`) are matched as minimums; a regulator's
+  output voltage is matched as an identity, so a 5 V LDO does not answer a
+  search for 3.3 V. The query interpretation is reported with the results.
+- [x] **IMPLEMENTED** - Substitute lookup with per-candidate evidence
+  (`JLCPartsDatabase.find_substitutes`). Identity is value + package; tolerance,
+  voltage and power are reported as caveats rather than used to filter, so a
+  usable part is disclosed rather than hidden.
+- [x] **IMPLEMENTED** - Values parsed from catalogue strings: SI prefixes,
+  decimals, `4R7` / `1M0` notation, `±1%` tolerances, `ppm` coefficients.
+- [x] **IMPLEMENTED** - The catalogue's broad leaves are split into the
+  platform's categories (`Power Management (PMIC)` becomes `regulator_ldo`,
+  `regulator_buck`, `voltage_reference`, `supervisor`, `battery_management`,
+  `power_switch`; `Diodes` becomes `diode`, `zener`, `schottky`, `led`). The
+  split is required for correctness — an LDO symbol asserts IN/OUT/GND pins that
+  a TL431 voltage reference does not have — and the searchable category list is
+  derived from the file, so a category cannot be offered that then returns
+  nothing.
+- [x] **IMPLEMENTED** - The minimum order quantity is read from the catalogue's
+  `attrition` JSON and carried through to the BOM. It is not a column; ignoring
+  it made every part look orderable in ones.
+- [x] **IMPLEMENTED** - Web UI: numeric search with the interpretation shown,
+  per-category part counts, and an "Alternatives" action listing each
+  substitute's reasons and caveats.
+
+Known gaps in the catalogue data, verified against the downloaded file rather
+than assumed:
+
+- [ ] The JLCPCB **Basic** library flag is present on 1 row of 179,894; the
+  **Preferred** flag on 972. Ranking uses Preferred. Establishing the real Basic
+  list would need a second data source.
+- [ ] Only 55,535 rows state a numeric value; the rest are text-searchable only.
+  A part identified solely by a part number cannot be substituted automatically.
+- [ ] Attributes are inconsistent between categories. The parser accepts the
+  spellings it knows and records nothing for the rest; an unstated tolerance is
+  "unknown", never zero.
 
 Research open-source and publicly accessible component databases.
 
@@ -813,9 +852,9 @@ Subsystems should include:
 
 * [x] Schematic - KiCad (GPL-3.0) - Core EDA engine - subprocess/CLI
 * [x] PCB - KiCad (GPL-3.0) - Core EDA engine - subprocess/CLI
-* [x] Component library - JLCParts/yaqwsx (CC0) - 600k+ parts - offline SQLite
-* [ ] Datasheets - Not yet integrated
-* [x] Component search - JLCParts database - parametric search implemented
+* [x] Component library - JLCParts/yaqwsx (CC0) - offline SQLite, 179,894 in-stock parts
+* [ ] Datasheets - Not yet integrated (parsing them would let pinouts be checked automatically)
+* [x] Component search - numeric parametric search + substitute lookup with evidence
 * [x] Netlist - CircuitIR internal + SPICE export
 * [x] Simulation - ngspice (BSD-3) - batch CLI - subprocess
 * [x] ERC - Custom implementation (MIT/GPL) - deterministic Python

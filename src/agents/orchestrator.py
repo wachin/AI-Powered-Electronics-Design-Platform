@@ -274,6 +274,46 @@ class AIDesignOrchestrator:
                 )
         return outcome.to_dict()
 
+    def _select_part(
+        self,
+        category: str,
+        query: str,
+        value: Optional[str] = None,
+    ) -> ComponentSpec:
+        """
+        Choose a component for a template circuit.
+
+        Order of preference:
+
+        1. The curated built-in part matching ``value``, because its symbol and
+           pinout have been checked against the rest of the pipeline.
+        2. A downloaded-catalog part found by *value* (a real part with stock
+           and a datasheet).
+        3. A downloaded-catalog part found by category alone, as a last resort.
+
+        Raises:
+            LookupError: if nothing is available at all. Returning a wrong part
+                silently is worse than stopping: the failure is visible here,
+                whereas a wrong value is discovered after the boards arrive.
+        """
+        if value:
+            builtin = self.db.find_builtin(category, value=value)
+            if builtin is not None:
+                return builtin
+
+        parts = self.db.search(query=query, category=category, min_stock=100, limit=1)
+        if not parts:
+            parts = self.db.search(query=query, category=category, limit=1)
+        if not parts:
+            parts = self.db.search(category=category, limit=1)
+        if not parts:
+            raise LookupError(
+                f"No component available for {category!r} matching {query!r}. "
+                f"Install the component catalog with: "
+                f"ai-electronics-design catalog-setup"
+            )
+        return parts[0]
+
     def _synthesize_circuit_ir(self, prompt: str, project_name: str) -> CircuitIR:
         """
         Synthesizes a structured Circuit IR based on input requirements.
@@ -283,12 +323,19 @@ class AIDesignOrchestrator:
 
         # Voltage Regulator Pattern
         if "regulator" in p or "5v to 3.3v" in p or "ldo" in p:
-            # 1. Fetch Parts from DB
-            ldo_spec = self.db.get_by_mpn("AMS1117-3.3") or self.db.search(category="regulator_ldo")[0]
-            c_in_spec = self.db.get_by_mpn("C-10uF-0805") or self.db.search(category="capacitor")[0]
-            c_out_spec = self.db.get_by_mpn("C-22uF-0805") or self.db.search(category="capacitor")[0]
-            res_spec = self.db.get_by_mpn("R-330-0805") or self.db.search(category="resistor")[0]
-            led_spec = self.db.get_by_mpn("LED-GREEN-0805") or self.db.search(category="led")[0]
+            # 1. Fetch Parts from DB.
+            #
+            # The values are stated explicitly. Picking "the first capacitor in
+            # the catalog" would return whatever the catalog ranks first, which
+            # is not a 10 uF input capacitor — and a design that silently uses
+            # the wrong value is worse than one that fails. The curated parts are
+            # preferred because their symbols and pinouts have been checked; a
+            # catalog search by value is the fallback.
+            ldo_spec = self._select_part("regulator_ldo", "3.3v", value="3.3V")
+            c_in_spec = self._select_part("capacitor", "10uF 0805", value="10uF")
+            c_out_spec = self._select_part("capacitor", "22uF 0805", value="22uF")
+            res_spec = self._select_part("resistor", "330 0805", value="330")
+            led_spec = self._select_part("led", "green 0805", value="Green")
 
             # 2. Instantiate LDO Regulator
             u1 = Component(
@@ -382,9 +429,11 @@ class AIDesignOrchestrator:
             circuit.power_domains["3V3_Domain"] = PowerDomain(name="3V3_Domain", voltage=3.3, max_current_ma=1000)
 
         else:
-            # Generic simple circuit
-            r_spec = self.db.search(category="resistor")[0]
-            led_spec = self.db.search(category="led")[0]
+            # Generic simple circuit: an LED with a current-limiting resistor.
+            # A 330 ohm resistor on 5 V gives roughly 5 mA through a green LED,
+            # which is visible without over-driving it.
+            r_spec = self._select_part("resistor", "330 0805", value="330")
+            led_spec = self._select_part("led", "green 0805", value="Green")
 
             r1 = Component(
                 ref="R1",

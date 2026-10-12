@@ -2,11 +2,11 @@
 Component Database and Parts Registry for AI-Powered Electronics Design Platform.
 
 Provides component search, parametric matching, symbol/footprint resolution,
-and distributor inventory data.
+substitute finding, and distributor inventory data.
 
 Priority:
-1. JLCPCB/LCSC offline catalog (yaqwsx/jlcparts dataset) - 600k+ parts
-2. Built-in fallback catalog - common parts for offline development
+1. The downloaded JLCPCB/LCSC catalog (~180,000 in-stock parts)
+2. Built-in fallback catalog - a few common parts, for offline development
 """
 
 from dataclasses import dataclass, field
@@ -35,6 +35,10 @@ class ComponentSpec:
     is_preferred: bool = False
     datasheet_url: str = ""
     product_url: str = ""
+    # Minimum quantity the distributor sells, and its own attrition figures.
+    # Carried through so a bill of materials can round quantities up honestly.
+    min_order: int = 1
+    attrition: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,13 +56,32 @@ class ComponentSpec:
             "lcsc_part": self.lcsc_part,
             "is_basic": self.is_basic,
             "is_preferred": self.is_preferred,
-            "datasheet_url": self.datasource_url,
+            "datasheet_url": self.datasheet_url,
             "product_url": self.product_url,
+            "min_order": self.min_order,
+            "attrition": self.attrition,
         }
 
     @property
     def datasource_url(self) -> str:
         return self.datasheet_url
+
+    def specifications(self) -> Dict[str, float]:
+        """
+        The numeric specifications of this part, parsed from its attributes.
+
+        Returns a dictionary with any of ``resistance``, ``capacitance``,
+        ``inductance``, ``frequency``, ``tolerance``, ``voltage``, ``power``,
+        ``current``, ``output_voltage`` — in base SI units. Empty when the part
+        carries no parseable specification, which is the honest answer for a
+        part number that is not described by a value.
+        """
+        from src.components.parameters import extract_parameters
+
+        if not self.attributes:
+            return {}
+        parsed = extract_parameters(self.attributes, self.category)
+        return {k: v for k, v in parsed.items() if k != "raw"}
 
 
 class ComponentDatabase:
@@ -623,32 +646,108 @@ class ComponentDatabase:
         category: Optional[str] = None,
         package: Optional[str] = None,
         min_stock: int = 0,
-        limit: int = 50
+        limit: int = 50,
+        sort: str = "stock",
     ) -> List[ComponentSpec]:
         """
         Search for components.
-        
+
         Args:
-            query: Free-text search (e.g., "10k 0402", "ldo 3.3v", "esp32")
-            category: Category filter (e.g., "resistor", "regulator_ldo")
-            package: Package filter (e.g., "0805", "SOT-23")
-            min_stock: Minimum stock quantity
-            limit: Maximum results
+            query: Query, e.g. ``"10k 0603"``, ``"100nF 50V 0805"``,
+                ``"ldo 3.3v"``, ``"esp32"``. Values are matched numerically.
+            category: Category filter, e.g. ``"resistor"``, ``"regulator_ldo"``.
+            package: Package filter, e.g. ``"0805"``, ``"SOT-23"``.
+            min_stock: Minimum stock quantity.
+            limit: Maximum results.
+            sort: ``"stock"``, ``"price"`` or ``"value"``.
         """
-        # Try JLCParts first if available
+        # Try the downloaded catalogue first if available
         if self.using_jlcparts:
             jlc_results = self._jlcparts_db.search(
                 query=query,
                 package=package,
                 min_stock=min_stock,
                 category=category,
-                limit=limit
+                limit=limit,
+                sort=sort,
             )
             if jlc_results:
                 return [self._jlcpart_to_spec(p) for p in jlc_results]
 
         # Fallback to built-in catalog
         return self._search_fallback(query, category, package, min_stock, limit)
+
+    def search_explained(
+        self,
+        query: str = "",
+        category: Optional[str] = None,
+        package: Optional[str] = None,
+        min_stock: int = 0,
+        limit: int = 50,
+        sort: str = "stock",
+    ) -> Dict[str, Any]:
+        """
+        Search and report how the query was interpreted.
+
+        Returns a dictionary with ``components``, ``notes`` and ``interpretation``
+        so a user interface can show why these results came back instead of
+        presenting a list the user has to take on trust.
+        """
+        if not self.using_jlcparts:
+            components = self._search_fallback(
+                query, category, package, min_stock, limit
+            )
+            return {
+                "components": [c.to_dict() for c in components],
+                "notes": ["Using the built-in fallback catalog; "
+                          "run 'catalog-setup' for the full catalog"],
+                "interpretation": query,
+                "source": self.data_source,
+            }
+
+        outcome = self._jlcparts_db.search_explained(
+            query=query, package=package, min_stock=min_stock,
+            category=category, limit=limit, sort=sort,
+        )
+        return {
+            "components": [
+                self._jlcpart_to_spec(p).to_dict() for p in outcome.parts
+            ],
+            "notes": outcome.notes,
+            "interpretation": outcome.query.summary(),
+            "source": self.data_source,
+        }
+
+    def find_substitutes(
+        self,
+        lcsc_part: str,
+        limit: int = 10,
+        min_stock: Optional[int] = None,
+        same_package: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Find parts that can replace a given one, with the evidence for each.
+
+        Only available with the downloaded catalogue: comparing parts requires
+        their parsed specifications, which the small fallback list does not have.
+        Returns dictionaries rather than ComponentSpec because the reasons and
+        caveats are the point, and they have nowhere to live on a spec.
+
+        See :meth:`JLCPartsDatabase.find_substitutes` for what is compared.
+        """
+        if not self.using_jlcparts:
+            return []
+        substitutes = self._jlcparts_db.find_substitutes(
+            lcsc_part, limit=limit, min_stock=min_stock, same_package=same_package
+        )
+        results: List[Dict[str, Any]] = []
+        for substitute in substitutes:
+            entry = self._jlcpart_to_spec(substitute.part).to_dict()
+            entry["reasons"] = substitute.reasons
+            entry["caveats"] = substitute.caveats
+            entry["verified"] = substitute.is_clean
+            results.append(entry)
+        return results
 
     def get_by_mpn(self, mpn: str) -> Optional[ComponentSpec]:
         """Find exact component by Manufacturer Part Number (MPN) or LCSC part."""
@@ -679,6 +778,34 @@ class ComponentDatabase:
                 return self._jlcpart_to_spec(jlc_part)
         return None
 
+    def find_builtin(
+        self,
+        category: str,
+        value: Optional[str] = None,
+        package: Optional[str] = None,
+    ) -> Optional[ComponentSpec]:
+        """
+        Look up a part in the curated built-in list only.
+
+        The built-in list is small, but its parts carry symbols and pinouts the
+        rest of the pipeline has been checked against. Template circuits use it
+        deliberately: when a design calls for "a 10 µF 0805 capacitor", taking
+        the curated one is safer than taking whichever 10 µF part the downloaded
+        catalog happens to rank first.
+
+        Returns ``None`` when nothing matches, so the caller can fall back to a
+        catalog search rather than silently using a different value.
+        """
+        for part in self._fallback_catalog:
+            if category and part.category != category:
+                continue
+            if value and part.value.lower() != value.lower():
+                continue
+            if package and part.package.lower() != package.lower():
+                continue
+            return part
+        return None
+
     def find_regulator(
         self,
         v_out: float,
@@ -696,15 +823,26 @@ class ComponentDatabase:
             category = "regulator_buck"
         
         results = self.search(query=query, category=category, package=package, min_stock=100)
-        
-        # Filter by current rating
+
+        # Filter by current rating, using the parsed attribute names the
+        # catalogue actually uses ("Output Current"), not invented ones. If a
+        # part does not state a current rating it is kept, because dropping it
+        # would silently hide usable regulators; the caller is expected to check
+        # the datasheet before buying.
         filtered = []
         for part in results:
-            i_max_attr = part.attributes.get("i_max") or part.attributes.get("current_a")
-            if i_max_attr and float(i_max_attr) >= i_max:
-                if v_in_max is None or part.attributes.get("v_in_max", 100) >= v_in_max:
-                    filtered.append(part)
-        
+            rated = part.attributes.get("output_current") or part.attributes.get("current")
+            if rated is not None and rated < i_max:
+                continue
+            if v_in_max is not None:
+                supply = (
+                    part.attributes.get("supply_voltage")
+                    or part.attributes.get("voltage")
+                )
+                if supply is not None and supply < v_in_max:
+                    continue
+            filtered.append(part)
+
         return filtered
 
     def find_mcu(self, cores: Optional[int] = None, wifi: bool = False, bluetooth: bool = False) -> List[ComponentSpec]:
@@ -725,18 +863,46 @@ class ComponentDatabase:
 
     def get_categories(self) -> List[str]:
         """Get list of available categories."""
-        cats = set()
         if self.using_jlcparts:
-            # We can't easily get categories from JLCParts without full scan
-            return [
-                "resistor", "capacitor", "inductor", "diode", "led",
-                "transistor", "mosfet", "regulator_ldo", "regulator_buck",
-                "regulator_boost", "microcontroller", "opamp", "crystal",
-                "connector", "switch", "sensor", "rf_module", "memory"
-            ]
-        for part in self._fallback_catalog:
-            cats.add(part.category)
-        return sorted(cats)
+            # Derived by classifying the downloaded file, so the list reflects
+            # what is in it rather than a hard-coded guess, and includes the
+            # refined categories (zener, supervisor, voltage_reference) that the
+            # catalogue's own broader leaves do not distinguish.
+            return sorted(self._jlcparts_db.internal_category_counts())
+        return sorted({part.category for part in self._fallback_catalog})
+
+    def internal_category_counts(self) -> Dict[str, int]:
+        """Counts by this platform's categories, from the downloaded catalogue."""
+        if not self.using_jlcparts:
+            counts: Dict[str, int] = {}
+            for part in self._fallback_catalog:
+                counts[part.category] = counts.get(part.category, 0) + 1
+            return counts
+        return self._jlcparts_db.internal_category_counts()
+
+    def catalog_category_counts(self, min_stock: int = 0) -> Dict[str, int]:
+        """
+        Counts by the catalogue's own category names.
+
+        Separate from :meth:`get_categories` because these are the upstream
+        names, useful for showing what the downloaded file contains, while
+        ``get_categories`` returns the names this platform searches with.
+        """
+        if not self.using_jlcparts:
+            return {}
+        return self._jlcparts_db.category_counts(min_stock=min_stock)
+
+    def warm(self) -> int:
+        """
+        Prepare the component catalog for fast parametric search.
+
+        Parsing the catalog's values takes a few seconds; doing it at start-up
+        keeps that off the first search. Returns the number of indexed parts, or
+        0 when the full catalog is not installed.
+        """
+        if not self.using_jlcparts:
+            return 0
+        return self._jlcparts_db.warm()
 
     def download_catalog(
         self,
@@ -759,29 +925,45 @@ class ComponentDatabase:
     # ============================================================
 
     def _jlcpart_to_spec(self, jlc: JLCPart) -> ComponentSpec:
-        """Convert JLCPart to unified ComponentSpec."""
-        # Get price from lowest tier
+        """
+        Convert a catalogue row to the platform's unified ComponentSpec.
+
+        The parsed catalogue attributes are carried through verbatim, because
+        everything downstream that reasons about a part — picking a footprint,
+        checking a voltage rating, finding a substitute — needs the numbers, not
+        a text blob. ``value`` is the readable engineering form ("10kΩ 100mW
+        ±1%") rather than the catalogue's description, which for many rows is
+        empty and for others is a whitespace-separated field dump.
+        """
         unit_price = 0.0
         if jlc.prices:
             unit_price = min(p["unit_price"] for p in jlc.prices)
-        
+
+        readable_value = jlc.specification_summary()
+        if not readable_value:
+            # No parsed specification: fall back to the part number, which is
+            # what identifies the part in that case.
+            readable_value = jlc.mfr_part or jlc.lcsc_part
+
         return ComponentSpec(
             mpn=jlc.mfr_part or jlc.lcsc_part,
             manufacturer=jlc.manufacturer,
             category=jlc.category,
-            value=jlc.description,
+            value=readable_value,
             package=jlc.package,
             symbol=jlc.symbol,
             footprint=jlc.footprint,
             description=jlc.description,
             stock=jlc.stock,
             price=unit_price,
-            attributes={},
+            attributes=dict(jlc.parameters),
             lcsc_part=jlc.lcsc_part,
             is_basic=jlc.is_basic,
             is_preferred=jlc.is_preferred,
             datasheet_url=jlc.datasheet_url,
             product_url=jlc.product_url,
+            min_order=jlc.min_order,
+            attrition=dict(jlc.attrition),
         )
 
     def _search_fallback(

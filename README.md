@@ -64,6 +64,13 @@ This project builds an AI-powered electronics design platform that transforms na
   substitution are limited to those. Install it with
   `ai-electronics-design catalog-setup` (see
   [Component Catalog](#component-catalog-180000-real-parts)).
+- ⚠️ **Parametric search covers 55,535 of the 179,894 parts** — those whose
+  attributes state a number. The rest are reachable by text search only. A
+  substitute is found by comparing parsed values, so a part described only by a
+  part number cannot be substituted automatically.
+- ⚠️ **The catalog's JLCPCB "Basic" library flag is effectively empty** (1 part
+  of 179,894). Ranking uses the Preferred flag (972 parts) instead. See
+  [Where it comes from](#where-it-comes-from).
 - ⚠️ Three implemented subsystems are **not wired into the pipeline**: the
   permission system, the process sandbox, and the free-form MCP agent. They have
   tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
@@ -75,6 +82,7 @@ This project builds an AI-powered electronics design platform that transforms na
 ### Planned / In Progress
 
 - 🔄 Wiring the orphaned modules into the pipeline (placement first)
+- 🔄 Datasheet PDF parsing, to check pinouts automatically instead of by hand
 - 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
 - 🔄 Datasheet understanding / RAG (section 8 of the ROADMAP)
 - 🔄 Enclosure generation and 3D component models
@@ -84,6 +92,8 @@ This project builds an AI-powered electronics design platform that transforms na
 | Piece | State |
 |---|---|
 | CLI + Python API | ✅ Works |
+| Component search (numeric, 179,894 parts) | ✅ Works |
+| Substitute lookup with per-part evidence | ✅ Works |
 | Natural language → specification | ✅ Works (local or cloud LLM) |
 | Specification → validated Circuit IR | ✅ Works |
 | Schematic + PCB + Gerbers | ✅ Works and is KiCad-verified |
@@ -425,6 +435,8 @@ Options:
 Subcommands:
   catalog-status            Show the component catalog in use
   catalog-setup [--dest P]  Download the full component catalog (~145 MB)
+  parts-search "10k 0603"   Search it by value, package, tolerance, rating
+  parts-substitute C12345   Find replacements, with what was verified
   mcp-status                Show optional MCP server availability
   mcp-setup [--server X]    Create isolated environments for MCP servers
 ```
@@ -577,19 +589,107 @@ Component catalog:
 | **Stock levels** | You will not design around a part with zero stock |
 | **Tiered pricing** | Real cost estimates for the BOM |
 | **Package, manufacturer, datasheet** | Enough to verify a part before buying |
-| **Parametric attributes** (JSON) | Resistance, tolerance, voltage, power — the basis for finding a substitute |
+| **Parametric attributes** (JSON) | Resistance, tolerance, voltage, power — parsed into numbers, and the basis for finding a substitute |
 
-Coverage of in-stock parts, by category:
+Coverage of in-stock parts, by the catalog's own categories:
 
-| Category | Parts available |
+| Category | Parts | Category | Parts |
+|---|---:|---|---:|
+| *(uncategorized)* | 67,230 | Resistors | 5,146 |
+| Connectors | 34,220 | Crystals / oscillators | 4,234 |
+| Transistors / thyristors | 12,507 | Power management (PMIC) | 4,138 |
+| Inductors, coils, chokes | 9,017 | Switches | 4,028 |
+| Capacitors | 7,227 | Power modules | 2,528 |
+| Diodes | 6,535 | Optoelectronics | 1,943 |
+| Circuit protection | 6,443 | Logic | 1,392 |
+
+**55,535 of those parts carry a numeric value** that parametric search can match.
+The remaining rows are identified only by a description or a part number and are
+reachable by text search.
+
+The 67,230 uncategorized rows are not a gap in the download: the upstream data
+simply leaves the category empty for them. Most still carry an unambiguous
+`Resistance` or `Capacitance` attribute, or name their type in the description,
+and the platform classifies them from that. After classification 16,171 parts
+remain genuinely unclassified, and the platform says so rather than guessing.
+
+The catalog's categories are also broader than the platform's. "Power Management
+(PMIC)" contains linear regulators, switching converters, voltage references,
+supervisors, chargers and load switches; "Diodes" contains zeners, Schottkys and
+LEDs. Those are split by reading each row, and the searchable category list
+reflects the result — 44 categories, including `zener`, `supervisor`,
+`voltage_reference` and `power_switch`. The split matters for correctness: giving
+a TL431 voltage reference an LDO symbol would assert IN/OUT/GND pins it does not
+have.
+
+### Searching the catalog
+
+Search matches **values**, not substrings:
+
+```bash
+ai-electronics-design parts-search "10k 1% 0603"
+```
+
+```text
+Query      : '10k 1% 0603'
+Understood : 10k, ±1%, package 0603
+Note       : Matched numerically: 10k, ±1%, package 0603
+Source     : JLCPCB/LCSC offline catalog (179,894 parts)
+
+    LCSC       MPN                        Package        Specification                      Stock      Unit
+  1. C49330116  AST0310KF                  0603           10kΩ 100mW ±1%                   388,789    0.0042
+  2. C49652949  GR0603F10KT5G00            0603           10kΩ 100mW ±1%                    29,904    0.0009
+```
+
+This matters because the obvious implementation is wrong. A `LIKE '%10k%'` search
+also matches `110kΩ` and `910kΩ` — parts that look right in a list and are wrong
+on the board. Here:
+
+| Query | Understood as |
 |---|---|
-| Resistors | 8,219 |
-| Capacitors | 6,908 |
-| Diodes | 4,422 |
-| Regulators | 3,061 |
-| LEDs | 1,789 |
-| MOSFETs / transistors | 838 |
-| Microcontrollers | 430 |
+| `10k 0603` | 10 kΩ, package 0603 |
+| `4R7` | 4.7 Ω (the R is a decimal point, not a unit) |
+| `4k7` | 4.7 kΩ |
+| `100nF 50V 0805` | 100 nF, **rated at least** 50 V, package 0805 |
+| `ldo 3.3v` | LDO with a 3.3 V **output** — a 5 V LDO is not a match |
+| `100nF 50V` | prefers the 50 V part over an unnecessary 500 V one |
+| `esp32`, `1n4148` | text search: a part number is not the number 32 |
+
+The interpretation is printed above the results, in the CLI and in the GUI, so
+you can see what the search understood rather than guessing from the output.
+
+### Finding a substitute
+
+When a part is out of stock, the question is what to buy instead. The answer is
+only useful if it says what was compared:
+
+```bash
+ai-electronics-design parts-substitute C22369937
+```
+
+```text
+Replacing: C22369937 RCA0310KJLF
+  category : resistor
+  package  : 0603
+  value    : 10kΩ 100mW ±5%
+
+1. C49330116 AST0310KF (0603) — all checks passed
+   + same resistance (10kΩ 100mW ±5%)
+   + same package (0603)
+   + tolerance ±1% is at least as tight as ±5%
+   + power rating at least as high (100mW)
+   + in stock (388,789)
+```
+
+Candidates are matched on **value and package**, which are identities: a 10 kΩ part
+is not a substitute for a 12 kΩ one, and a different package will not fit the
+footprint. Everything else — tolerance, voltage rating, power rating, stock — is
+**reported rather than used to reject**, so a part whose tolerance is looser
+appears with `! looser tolerance: ±5% vs ±1%` instead of being hidden. A hidden
+part cannot be chosen; a flagged one can.
+
+A part with no numeric value (identified only by a part number) cannot be
+compared this way, and the command says so rather than guessing.
 
 ### Where it comes from
 
@@ -599,6 +699,19 @@ libraries cannot open, so this project fetches
 [CDFER/jlcpcb-parts-database](https://github.com/CDFER/jlcpcb-parts-database),
 which republishes the same data as a single SQLite file, rebuilt daily by GitHub
 Actions and filtered to parts with stock.
+
+Two caveats about the data, verified against this catalog copy rather than assumed:
+
+* **The JLCPCB "Basic" library flag is effectively absent.** The `basic` column is
+  set on 1 of 179,894 rows. The `preferred` column is set on 972. Ranking therefore
+  uses Preferred, and `is_basic` is false for almost everything. Do not read the
+  `library_type` column (`base` / `expand`) as the basic/preferred flag — an earlier
+  version of this code did, and it made every part look non-preferred.
+* **Attributes are not uniform.** Which keys exist depends on the category
+  (`Resistance` for resistors, `Capacitance` and `Voltage Rating` for capacitors,
+  `Output Voltage` for regulators). The parser accepts every spelling it knows and
+  records nothing for what it cannot read, so an unstated tolerance is "unknown",
+  never zero.
 
 ### Configuration
 
@@ -775,6 +888,13 @@ so `--no-routing` can be omitted even without it.
 source venv/bin/activate
 
 # Run tests (pytest config lives in pyproject.toml)
+pytest -q
+
+# Run them again with the full catalog installed. Some behaviour differs when a
+# real catalog is present — part substitution returns catalog parts instead of
+# the curated ones, and the category list is derived from the catalog — so this
+# is a genuinely different run, not a slower one. CI does it weekly.
+ai-electronics-design catalog-setup
 pytest -q
 
 # Generate a design

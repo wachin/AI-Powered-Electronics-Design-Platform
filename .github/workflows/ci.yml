@@ -4,6 +4,10 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # The catalog job downloads 145 MB, so it is not run on every push. It is
+  # scheduled weekly and can be triggered by hand.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 # Cancel superseded runs on the same ref.
@@ -42,6 +46,45 @@ jobs:
       # DSH_REQUIRE_KICAD=1 turns "kicad-cli missing" from a skip into a failure,
       # so a broken install cannot masquerade as a green build.
       - name: Run test suite
+        env:
+          DSH_REQUIRE_KICAD: "1"
+        run: pytest -q
+
+  catalog-tests:
+    name: Tests (with the full component catalog)
+    runs-on: ubuntu-latest
+    # Not on every push: the catalog is ~145 MB. Weekly, or on demand.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # KiCad supplies the symbol and footprint libraries the generators read at
+      # runtime; without them these tests skip instead of running.
+      - name: Install KiCad and ngspice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends kicad ngspice
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Download the component catalog
+        run: |
+          python -m src.cli catalog-setup
+          python -m src.cli catalog-status
+
+      # Several behaviours differ when a real catalog is installed: part
+      # substitution returns catalog parts rather than curated ones, and the
+      # category taxonomy is derived from the catalog rather than assumed. Those
+      # paths are only covered here.
+      - name: Run test suite against the real catalog
         env:
           DSH_REQUIRE_KICAD: "1"
         run: pytest -q

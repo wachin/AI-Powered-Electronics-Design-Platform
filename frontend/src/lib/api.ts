@@ -4,7 +4,9 @@ import type {
   JobStatus, 
   DesignResponse,
   ComponentSearchRequest,
-  ComponentResult 
+  ComponentResult,
+  ComponentSearchResponse,
+  SubstituteResponse,
 } from '../types'
 
 const api = axios.create({
@@ -25,14 +27,30 @@ export const designApi = {
 }
 
 export const componentApi = {
-  search: (request: ComponentSearchRequest): Promise<{ data: ComponentResult[] }> =>
+  search: (
+    request: ComponentSearchRequest,
+  ): Promise<{ data: ComponentSearchResponse }> =>
     api.post('/components/search', request),
   
-  getCategories: (): Promise<{ data: { categories: string[] } }> =>
-    api.get('/components/categories'),
-  
+  getCategories: (): Promise<{
+    data: {
+      /** Category names that search accepts, with part counts per name. */
+      categories: string[]
+      category_counts: Record<string, number>
+      /** The catalog's own, broader category names, for reference. */
+      catalog_categories: Record<string, number>
+    }
+  }> => api.get('/components/categories'),
+
   get: (mpn: string): Promise<{ data: ComponentResult }> =>
     api.get(`/components/${mpn}`),
+
+  /** Parts that can replace a part, with the checks that were made. */
+  getSubstitutes: (
+    lcscPart: string,
+    options: { limit?: number; min_stock?: number; same_package?: boolean } = {},
+  ): Promise<{ data: SubstituteResponse }> =>
+    api.get(`/components/${lcscPart}/substitutes`, { params: options }),
 }
 
 // Collaboration API
@@ -83,6 +101,7 @@ export const apiClient = {
   searchComponents: componentApi.search,
   getCategories: componentApi.getCategories,
   getComponent: componentApi.get,
+  getSubstitutes: componentApi.getSubstitutes,
   // Collaboration
   createRoom: collaborationApi.createRoom,
   getRoom: collaborationApi.getRoom,

@@ -118,14 +118,28 @@ of a reference repository does not make it a dependency of this project.
 
 | Field | Value |
 |---|---|
-| Project | jlcparts — JLCPCB/LCSC component catalog |
+| Project | jlcparts — JLCPCB/LCSC component catalog (upstream data) |
 | Upstream | https://github.com/yaqwsx/jlcparts |
+| License | MIT (the jlcparts tooling) |
 | How used | Optional offline SQLite catalog, read at runtime when present |
 
-When the jlcparts database is absent, the platform falls back to a small
-built-in catalog of common parts defined in `src/components/database.py`.
-Part numbers, prices and stock figures are indicative and must be verified with
-the distributor before ordering.
+| Field | Value |
+|---|---|
+| Project | jlcpcb-parts-database — republished SQLite build |
+| Source | https://github.com/CDFER/jlcpcb-parts-database |
+| How used | The download target of `catalog-setup`; the single-file SQLite build this project actually reads |
+
+The upstream jlcparts dataset is published as a ~10 GB multi-volume archive that
+most zip libraries cannot open, so this project fetches CDFER's single-file
+SQLite rebuild of the same JLCPCB data. The file is **not** redistributed here:
+it is downloaded by the user into their own cache directory, and it is not
+covered by this project's license. Check the distributor's terms before
+redistributing the catalog itself.
+
+When the catalog is absent, the platform falls back to a small built-in catalog
+of common parts defined in `src/components/database.py`. Part numbers, prices and
+stock figures are indicative and must be verified with the distributor before
+ordering.
 
 ---
 
