@@ -364,7 +364,9 @@ We need to understand how an AI system could answer questions such as:
 
 Investigate:
 
-* [ ] KiCad libraries - Not directly used (symbol/footprint mapping implemented)
+* [x] **KiCad libraries** - **READ AT RUNTIME** for symbols and footprints
+  (`src/generators/kicad_symbols.py`, `kicad_footprints.py`). Not vendored;
+  CC-BY-SA-4.0 with the design exception — see `CREDITS.md`.
 * [ ] SnapEDA - Not investigated
 * [ ] Ultra Librarian - Not investigated (commercial)
 * [ ] Octopart - Not investigated (commercial API)
@@ -392,7 +394,10 @@ Investigate how to obtain:
 * [x] Datasheet - URL in JLCParts data (datasheet column)
 * [x] Symbol - Auto-mapped from category (Device:R, Regulator_Linear:LDO, etc.)
 * [x] Footprint - Auto-mapped from package (0805 → Resistor_SMD:R_0805, etc.)
-* [ ] 3D model - Not yet implemented (KiCad 3D model paths available)
+* [x] **3D model** - **IMPLEMENTED** as glTF export
+  (`src/generators/gltf_exporter.py`, called by the orchestrator); the
+  footprints' KiCad 3D model paths are preserved but the models themselves are
+  not yet loaded
 * [x] Electrical specifications - In description + attributes (voltage, current, etc.)
 * [x] Availability - Stock column in JLCParts
 * [x] Price - Price tiers parsed from JLCParts pricing data
@@ -449,7 +454,9 @@ Investigate:
   * [x] Missing decoupling capacitors for ICs/regulators - WARNING
   * [x] LED without series current-limiting resistor - ERROR
   * [x] Single-pin nets - WARNING
-* [ ] DRC - Delegated to KiCad (kicad-cli pcb drc)
+* [x] **DRC** - **IMPLEMENTED and verified** via `kicad-cli pcb drc`; a
+  generated board loads and reports 0 unconnected pads, 0 shorts and 0 crossing
+  tracks (`tests/test_kicad_pcb.py`)
 * [x] **SPICE** - **IMPLEMENTED** (src/simulation/ngspice.py)
   * [x] DC operating point (.op)
   * [x] Transient analysis (.tran)
@@ -482,10 +489,18 @@ Research open-source PCB routing algorithms and projects.
 
 Investigate:
 
-* [x] **autorouters** - **FreeRouting integrated** (src/routing/freerouting.py)
-  * [x] DSN export from KiCad
-  * [x] FreeRouting execution (Java JAR)
-  * [x] SES import back to KiCad
+* [~] **autorouters** - FreeRouting wrapper written but **cannot run on this
+  machine**. Three independent blockers were verified (2026-10):
+  * [x] DSN export from KiCad - **works via `pcbnew.ExportSpecctraDSN`**, verified
+    producing a valid Specctra file. Note `kicad-cli pcb export dsn` does NOT
+    exist in KiCad 7+; the wrapper still calls that removed command.
+  * [ ] FreeRouting execution (Java JAR) - **BLOCKED**: every bundled jar
+    (`freerouting-current`, `2.3.0`, `2.5.0-RC12`) is compiled for Java 25
+    (class file 69.0); this machine has Java 21 (up to 65.0).
+  * [ ] SES import back to KiCad - **BLOCKED**: the wrapper calls
+    `kicad-cli pcb import ses`, which does not exist. `kicad-cli pcb` offers only
+    `drc`, `export` and `render`. The working path is
+    `pcbnew.ImportSpecctraSES`.
 * [ ] global routing - Delegated to FreeRouting
 * [ ] detailed routing - Delegated to FreeRouting
 * [ ] pathfinding - FreeRouting internal
@@ -498,7 +513,9 @@ Investigate:
 * [ ] machine learning for PCB routing - Not implemented
 * [ ] differential pair routing - Not implemented
 * [ ] impedance-aware routing - Not implemented
-* [ ] thermal considerations - Partially implemented (smart placement separates heat sources)
+* [ ] thermal considerations - Module exists (`src/pcb/smart_placement.py`,
+  separates heat sources) but is **not called by the pipeline** (see section 10
+  placement note)
 * [ ] power distribution - Not implemented
 * [ ] ground planes - Not implemented (KiCad supports, not auto-generated)
 
@@ -511,7 +528,12 @@ Determine whether we should:
 3. [ ] Develop our own routing engine - Not needed for MVP
 4. [ ] Use AI only for high-level placement/routing decisions and deterministic algorithms for final routing - Future work
 
-**Placement status:** Smart placement implemented with collision avoidance, thermal awareness (separates heat sources), signal integrity grouping (keeps related components close), power domain awareness, edge clearance enforcement. Supports COMPACT, THERMAL, SIGNAL_INTEGRITY, and BALANCED strategies.
+**Placement status:** `src/pcb/smart_placement.py` implements collision
+avoidance, thermal awareness, signal-integrity grouping, power-domain awareness
+and edge clearance, with COMPACT/THERMAL/SIGNAL_INTEGRITY/BALANCED strategies,
+and has 8 passing tests. **It is currently orphaned**: no module in `src/` or
+`main.py` imports it, so PCB generation still uses a naive grid layout. The
+capability exists but does not affect any output.
 
 ---
 
@@ -573,11 +595,14 @@ Investigate:
 * [ ] WebGL - Not yet
 * [ ] Three.js - Not yet (planned for 3D)
 * [ ] Monaco Editor - Not yet (planned for code editor)
-* [ ] WebSockets - Not yet (planned for real-time updates)
-* [ ] collaborative editing - Not yet
-* [ ] CRDT - Not yet
-* [ ] Yjs - **AVAILABLE** in `external/yjs/`; planned for collaboration
-* [ ] real-time synchronization - Not yet
+* [x] **WebSockets** - **IMPLEMENTED** (`/api/collaboration/ws/...` in
+  `src/api/main.py`, `src/collaboration/server.py`, `frontend/src/hooks/useCollaboration.ts`)
+* [x] **collaborative editing** - **IMPLEMENTED** (room join/leave, presence,
+  cursor broadcast)
+* [~] **CRDT** - Yjs used for document state; the server relays Yjs binary
+  updates rather than implementing a CRDT itself
+* [x] **Yjs** - **IMPLEMENTED** (`yjs`/`y-websocket` in `frontend/package.json`)
+* [x] **real-time synchronization** - **IMPLEMENTED** for room/document updates
 
 Find GitHub projects that implement browser-based schematic or PCB editors.
 
@@ -682,12 +707,20 @@ For each tool determine:
   - RestrictedFileSystem wrapper for safe file operations
   - SecureExecutor combining permissions and sandboxing
   - 16 tests passing (7 permission tests, 7 sandbox tests, 1 secure executor test, 1 skipped resource limits)
-* [ ] MCP security
-* [ ] tool permissions
-* [ ] sandboxing
+  - **NOT WIRED IN:** `src/security/permissions.py` and `sandbox.py` are imported
+    by nothing outside their own tests (`sandbox` is imported only by
+    `permissions`). The REST API exposes no permission or sandbox endpoint, so
+    the capability does not currently protect any operation.
+* [~] MCP security - Secure-executor wrappers exist but are **not wired into
+  the API or CLI** (see below)
+* [x] **tool permissions** - **IMPLEMENTED** (capability-based roles in
+  `src/security/permissions.py`)
+* [x] **sandboxing** - **IMPLEMENTED** (resource limits and path/command
+  restrictions in `src/security/sandbox.py`)
 * [ ] supply-chain attacks
 * [ ] untrusted KiCad files
-* [ ] LLM hallucinations
+* [x] **LLM hallucinations** - Addressed deterministically: MPN resolution,
+  pin validation, ERC and the validate-and-repair loop (`docs/llm-pipeline.md`)
 
 Propose a permission architecture.
 
@@ -950,12 +983,19 @@ Create a phased roadmap:
 ## Phase 12 — Web interface
 - [x] **COMPLETE** - React/TypeScript frontend (frontend/) + FastAPI backend (src/api/main.py)
 
-## Phase 13 — Collaboration
-- [x] **COMPLETE** - Yjs CRDT real-time collaboration (src/collaboration/server.py, frontend/src/hooks/useCollaboration.ts)
+## Phase 13 — Collaboration (DEFERRED — lowest priority)
+- [x] **IMPLEMENTED** - Yjs-based real-time collaboration
+  (src/collaboration/server.py, frontend/src/hooks/useCollaboration.ts),
+  exposed at `/api/collaboration/ws/...`
+- [ ] **NOT A PRIORITY** - Feature-complete is preferred over collaborative.
+  See section 28: this is scheduled last and blocks nothing else. Recorded here
+  as done work, not as a recommended next step.
 
 ## Phase 14 — Advanced AI hardware engineer
 
-- [x] **IMPLEMENTED** - AIDesignAgent with MCP integration (src/agents/ai_agent.py, src/agents/mcp_client.py)
+- [~] **ORPHANED** - AIDesignAgent with MCP integration exists
+  (src/agents/ai_agent.py, src/agents/mcp_client.py) and has tests, but **no
+  API route or CLI flag reaches it**; only tests import it. See section 22.
   - Rule-based planning for LDO, buck, boost, LED circuits
   - MCP client for KiCad MCP server (stdio transport, JSON-RPC 2.0)
   - KiCadMCPTools wrapper with 40+ tool wrappers (schematic, PCB, netlist, validation, editing, parts registry)
@@ -975,7 +1015,65 @@ For each phase specify:
 
 ---
 
-# 22. TECHNOLOGY PREFERENCES
+# 22. VERIFICATION STATUS: WHAT IS WIRED IN, AND WHAT IS ORPHANED
+
+- [x] **AUDITED (2026-10)** - Every claim below was checked against the running
+  system, not against the intent of the code
+
+This section exists because several capabilities in this repository are
+implemented and tested but **never called by the pipeline**, and several
+checkboxes above previously overstated what worked. It distinguishes "code
+exists" from "code affects output".
+
+## Wired in and verified end to end
+
+| Capability | Evidence |
+|---|---|
+| Circuit IR | `src/core/circuit_ir.py`; used by 11 modules |
+| Specification -> Circuit IR, with real MPNs and pins | `src/core/circuit_builder.py`; `tests/test_circuit_builder.py` |
+| ERC (6 rules) | `src/core/erc.py`; gates the generator |
+| LLM pipeline + validate/repair loop | `src/llm/`; `tests/test_llm_pipeline_repair.py` |
+| Schematic with real electrical connectivity | `kicad-cli sch export netlist` returns all expected nets; `tests/test_kicad_netlist.py` |
+| PCB with real pads and assigned nets | `kicad-cli pcb drc` loads the board: 0 unconnected pads, 0 shorts, 0 crossings; `tests/test_kicad_pcb.py` |
+| Gerber + drill export | `kicad-cli pcb export gerbers/drill` succeeds on a generated board |
+| SPICE simulation | ngspice-44.2; `ngspice.py`; verified running on a generated LDO |
+| BOM | Real catalog MPNs, descriptions and prices via the orchestrator |
+| glTF 3D export | `src/generators/gltf_exporter.py`, called by the orchestrator |
+| REST API + collaboration WebSocket | `src/api/main.py`; frontend builds (`vite build` OK) |
+
+## Implemented but ORPHANED (no caller in `src/` or `main.py`)
+
+| Capability | Module | Consequence |
+|---|---|---|
+| Smart PCB placement | `src/pcb/smart_placement.py` | PCB generation uses a naive grid; collision/thermal/signal-integrity logic never runs (8 tests pass in isolation) |
+| Permission system | `src/security/permissions.py` | No operation is protected by it; not exposed by the API |
+| Sandboxing | `src/security/sandbox.py` | Imported only by `permissions.py`; never enforced |
+| AI agent + MCP tools | `src/agents/ai_agent.py`, `mcp_client.py` | Reachable only from tests; not exposed by the API or CLI |
+
+**First action for the next milestone should be to wire these in or delete them.**
+Dead code that passes tests is worse than absent code: it looks like a
+capability that the product does not have.
+
+## Blocked by the environment, not by this codebase
+
+| Capability | Blocker |
+|---|---|
+| FreeRouting auto-routing | Every bundled jar is compiled for Java 25 (class file 69.0); this machine has Java 21 (65.0) |
+| DSN/SES round trip | Wrapper calls `kicad-cli pcb export dsn` and `kicad-cli pcb import ses`, neither of which exists in KiCad 7+. Both work through `pcbnew` instead |
+| 3D component models | Footprint 3D model paths are preserved, but no KiCad 3D models are loaded |
+
+## Not implemented at all
+
+* Datasheet understanding / RAG (section 8)
+* Multi-turn clarification of missing requirements
+* Electrical constraint and component-rating verification
+* Enclosure generation
+* CI, container builds, and packaging (there are no `.github/workflows`, no
+  `Dockerfile`, and no `pyproject.toml`)
+
+---
+
+# 23. TECHNOLOGY PREFERENCES
 
 - [x] **FOLLOWED** - Current implementation aligns with preferences
 
@@ -1006,7 +1104,7 @@ The system should not require users to have expensive proprietary software.
 
 ---
 
-# 23. LICENSE ANALYSIS
+# 24. LICENSE ANALYSIS
 
 - [~] **PARTIALLY COMPLETE** - Core dependencies analyzed; full table not produced
 
@@ -1041,7 +1139,7 @@ Instead, identify license compatibility issues that should be reviewed.
 
 ---
 
-# 24. FINAL REPORT
+# 25. FINAL REPORT
 
 - [ ] **PENDING** - This ROADMAP.md serves as living technical foundation
 
@@ -1075,7 +1173,7 @@ The report must contain:
 
 ---
 
-# 25. VERY IMPORTANT: DO NOT WRITE THE APPLICATION YET
+# 26. VERY IMPORTANT: DO NOT WRITE THE APPLICATION YET
 
 - [~] **PARTIALLY VIOLATED** - Application code written (src/, main.py, tests/) before research complete
   * Rationale: Prototyping validated architecture choices (CircuitIR, KiCad S-expr, JLCParts, ERC, SPICE, FreeRouting)
@@ -1107,7 +1205,7 @@ Also answer:
 
 ---
 
-# 26. EVIDENCE REQUIREMENT
+# 27. EVIDENCE REQUIREMENT
 
 - [x] **FOLLOWED** - Implementation references external/ submodules and verified capabilities
 
@@ -1132,7 +1230,7 @@ The final report should be useful as the technical foundation for a future softw
 
 ---
 
-# 27. COLLABORATION AND VERSION CONTROL
+# 28. COLLABORATION AND VERSION CONTROL
 
 - OPTIONAL / DEFERRED - Collaboration is deliberately scheduled last. The
   priority is a working single-user design pipeline (prompt -> validated
