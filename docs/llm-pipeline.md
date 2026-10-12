@@ -240,7 +240,7 @@ It now emits, for every design:
 
 Verified with `kicad-cli` (KiCad 9.0.2) both by
 `tests/test_kicad_netlist.py::TestKiCadAcceptsSchematic` and by
-`tools_check_netlist.py`. A generated LDO yields:
+`scripts/tools_check_netlist.py`. A generated LDO yields:
 
 ```
 (net (code "1") (name "/GND")  ... U1 pin 1 (pinfunction "GND")
@@ -297,9 +297,9 @@ external DSN converter, or `pcbnew` Python scripting.
 ### How to re-verify
 
 ```bash
-python tools_check_netlist.py                 # schematic -> netlist, with kicad-cli
-python tools_e2e_check.py --provider mock     # full pipeline, offline
-python tools_e2e_check.py --provider ollama --model qwen2.5:3b --timeout 900
+python scripts/tools_check_netlist.py                 # schematic -> netlist, with kicad-cli
+python scripts/tools_e2e_check.py --provider mock     # full pipeline, offline
+python scripts/tools_e2e_check.py --provider ollama --model qwen2.5:3b --timeout 900
 pytest tests/test_kicad_netlist.py tests/test_kicad_pcb.py -v
 ```
 
@@ -332,5 +332,5 @@ To support a new topology:
 * `src/generators/kicad_symbols.py` — reader for installed KiCad symbol libraries
 * `tests/test_llm_providers.py`, `tests/test_circuit_builder.py`,
   `tests/test_llm_pipeline_repair.py`, `tests/test_kicad_netlist.py` — coverage
-* `tools_e2e_check.py` — end-to-end check against a real provider
-* `tools_check_netlist.py` — verifies the schematic produces a real netlist
+* `scripts/tools_e2e_check.py` — end-to-end check against a real provider
+* `scripts/tools_check_netlist.py` — verifies the schematic produces a real netlist

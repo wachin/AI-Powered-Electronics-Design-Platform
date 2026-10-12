@@ -8,7 +8,7 @@
 -->
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-239%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-243%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -1025,8 +1025,8 @@ AI-Powered-Electronics-Design-Platform/
 │   └── llm-pipeline.md             # Pipeline architecture + verification status
 ├── research/
 │   └── flux-ai-patent-search.md    # Patent search + independence verification
-├── tools_check_netlist.py           # Verifies schematic -> real KiCad netlist
-├── tools_e2e_check.py               # End-to-end check against a real LLM
+├── scripts/tools_check_netlist.py           # Verifies schematic -> real KiCad netlist
+├── scripts/tools_e2e_check.py               # End-to-end check against a real LLM
 ├── src/
 │   ├── cli.py                      # CLI implementation
 │   ├── core/

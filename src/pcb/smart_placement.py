@@ -344,10 +344,11 @@ class SmartPlacer:
             is_connector = comp.component_type == ComponentType.CONNECTOR
             is_high_power = geo.power_dissipation > 1.0
             is_thermal = geo.thermal_pad
+            # True when any pin of this component sits on a power net.
             is_critical_net = any(
-                net in self.power_nets 
-                for pin in comp.pins 
-                if pin.connected_net and pin.connected_net in self.power_nets
+                pin.connected_net in self.power_nets
+                for pin in comp.pins
+                if pin.connected_net
             )
             connectivity = len(comp.pins)
             

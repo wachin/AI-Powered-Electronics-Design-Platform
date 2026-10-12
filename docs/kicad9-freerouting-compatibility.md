@@ -126,7 +126,7 @@ else:
 
 ```bash
 # Test routing on KiCad 9 (expects graceful failure)
-python test_buck.py
+python scripts/test_buck.py
 
 # Verify error message is informative
 grep "DSN export was removed" test_output.log
@@ -137,4 +137,4 @@ grep "DSN export was removed" test_output.log
 - `src/routing/freerouting.py` - FreeRouting integration
 - `src/agents/orchestrator.py` - Pipeline orchestration (handles routing failure)
 - `src/generators/kicad_generator.py` - KiCad PCB generation
-- `test_buck.py` - Test script demonstrating the issue
+- `scripts/test_buck.py` - Test script demonstrating the issue

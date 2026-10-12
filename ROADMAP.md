@@ -528,12 +528,13 @@ Determine whether we should:
 3. [ ] Develop our own routing engine - Not needed for MVP
 4. [ ] Use AI only for high-level placement/routing decisions and deterministic algorithms for final routing - Future work
 
-**Placement status:** `src/pcb/smart_placement.py` implements collision
-avoidance, thermal awareness, signal-integrity grouping, power-domain awareness
-and edge clearance, with COMPACT/THERMAL/SIGNAL_INTEGRITY/BALANCED strategies,
-and has 8 passing tests. **It is currently orphaned**: no module in `src/` or
-`main.py` imports it, so PCB generation still uses a naive grid layout. The
-capability exists but does not affect any output.
+**Placement status:** WIRED IN. `src/pcb/smart_placement.py` provides the
+positions used by `generate_pcb()`, and the board outline is computed from the
+real pad coordinates rather than a fixed rectangle. It also shipped with a
+`NameError` in `_determine_placement_order` that made `place_all()` unusable;
+the original 8 tests only covered the helper classes, so the bug went unnoticed
+until the module was connected. Fixed, with regression tests that call
+`place_all()` directly.
 
 ---
 
@@ -952,7 +953,11 @@ Create a phased roadmap:
 - [x] **COMPLETE** - ngspice integration (src/simulation/ngspice.py)
 
 ## Phase 8 — PCB placement
-- [x] **COMPLETE** - Smart placement with collision avoidance, thermal awareness, signal integrity (src/pcb/smart_placement.py)
+- [x] **COMPLETE (2026-10)** - Smart placement is now used by PCB generation
+  (collision avoidance, thermal awareness, signal-integrity grouping,
+  power-domain awareness, edge clearance). Board outlines are derived from the
+  placed pads: a 5-part LDO went from a 180x120 mm fixed rectangle to 22x20 mm.
+  Verified: routed board has 0 unconnected pads and exports Gerbers.
 
 ## Phase 9 — PCB routing
 - [x] **COMPLETE (2026-10)** - FreeRouting integration working end to end.
@@ -1057,7 +1062,7 @@ exists" from "code affects output".
 
 | Capability | Module | Consequence |
 |---|---|---|
-| Smart PCB placement | `src/pcb/smart_placement.py` | PCB generation uses a naive grid; collision/thermal/signal-integrity logic never runs (8 tests pass in isolation) |
+| ~~Smart PCB placement~~ | `src/pcb/smart_placement.py` | **WIRED IN (2026-10).** PCB generation now asks the placer for positions, and the board outline is derived from the real pads. Contour for a 5-part LDO: **180x120 mm -> 22x20 mm**. |
 | Permission system | `src/security/permissions.py` | No operation is protected by it; not exposed by the API |
 | Sandboxing | `src/security/sandbox.py` | Imported only by `permissions.py`; never enforced |
 | AI agent + MCP tools | `src/agents/ai_agent.py`, `mcp_client.py` | Reachable only from tests; not exposed by the API or CLI |

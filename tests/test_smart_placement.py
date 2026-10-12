@@ -324,3 +324,78 @@ def test_large_board():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+class TestPlaceAllRuns:
+    """
+    Regression coverage for `SmartPlacer.place_all()`.
+
+    The module shipped with a `NameError` inside `_determine_placement_order`, so
+    `place_all()` had never actually been executed. The original tests only
+    exercised the helper classes, which is why they passed while the placer was
+    unusable. These tests call the real entry point.
+    """
+
+    def _circuit(self):
+        from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
+
+        circuit = CircuitIR(name="placement_test")
+        specs = [
+            ("U1", "AMS1117-3.3", ComponentType.REGULATOR_LDO,
+             "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
+             [("1", "GND", PinType.POWER_IN), ("2", "VO", PinType.POWER_OUT),
+              ("3", "VI", PinType.POWER_IN)]),
+            ("C1", "10uF", ComponentType.CAPACITOR,
+             "Capacitor_SMD:C_0805_2012Metric",
+             [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
+            ("C2", "22uF", ComponentType.CAPACITOR,
+             "Capacitor_SMD:C_0805_2012Metric",
+             [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
+            ("R1", "330", ComponentType.RESISTOR,
+             "Resistor_SMD:R_0805_2012Metric",
+             [("1", "1", PinType.PASSIVE), ("2", "2", PinType.PASSIVE)]),
+        ]
+        for ref, value, kind, footprint, pins in specs:
+            comp = Component(ref=ref, value=value, component_type=kind,
+                             footprint=footprint, symbol="X", mpn=value)
+            for number, name, ptype in pins:
+                comp.add_pin(number, name, ptype)
+            circuit.add_component(comp)
+
+        circuit.connect("U1", "3", "VIN")
+        circuit.connect("U1", "2", "VOUT")
+        circuit.connect("U1", "1", "GND")
+        circuit.connect("C1", "1", "VIN")
+        circuit.connect("C1", "2", "GND")
+        circuit.connect("C2", "1", "VOUT")
+        circuit.connect("C2", "2", "GND")
+        circuit.connect("R1", "1", "VOUT")
+        circuit.connect("R1", "2", "GND")
+        return circuit
+
+    def test_place_all_returns_every_component(self):
+        placed = SmartPlacer(self._circuit(), board_width=60, board_height=50).place_all()
+        assert set(placed) == {"U1", "C1", "C2", "R1"}
+
+    def test_placed_components_have_positions(self):
+        placed = SmartPlacer(self._circuit(), board_width=60, board_height=50).place_all()
+        for ref, component in placed.items():
+            x, y = component.position
+            assert isinstance(x, float) and isinstance(y, float), ref
+
+    def test_components_do_not_overlap(self):
+        """Collision avoidance is the main reason to use this over a grid."""
+        placed = SmartPlacer(self._circuit(), board_width=60, board_height=50).place_all()
+        refs = list(placed)
+        for i, a in enumerate(refs):
+            for b in refs[i + 1:]:
+                assert not placed[a].bbox.intersects(placed[b].bbox, clearance=0.1), (
+                    f"{a} overlaps {b}"
+                )
+
+    def test_placement_fits_inside_the_board(self):
+        width, height = 60.0, 50.0
+        placed = SmartPlacer(self._circuit(), board_width=width, board_height=height).place_all()
+        for ref, component in placed.items():
+            x, y = component.position
+            assert 0 <= x <= width, f"{ref} x out of board"
+            assert 0 <= y <= height, f"{ref} y out of board"

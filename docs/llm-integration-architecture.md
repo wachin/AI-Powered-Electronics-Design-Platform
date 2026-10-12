@@ -283,7 +283,7 @@ pytest tests/test_llm_integration.py -v
 pytest tests/ -v
 
 # Test specific provider
-python test_real_llm.py  # Set API keys as env vars first
+python scripts/test_real_llm.py  # Set API keys as env vars first
 ```
 
 ## Supported Circuit Types

@@ -267,14 +267,19 @@ class KiCadGenerator:
         pad_nets_by_ref: Dict[str, Dict[str, str]] = {}
         unresolved: List[str] = []
 
+        positions_by_ref, board_size = self._plan_placement()
         total = max(len(self.circuit.components), 1)
         cols = max(1, int(math.ceil(math.sqrt(total))))
         x0, y0, pitch = 60.0, 60.0, 30.0
 
         for index, (ref, comp) in enumerate(self.circuit.components.items()):
-            col, row = index % cols, index // cols
-            at_x = x0 + col * pitch
-            at_y = y0 + row * pitch
+            if ref in positions_by_ref:
+                at_x, at_y = positions_by_ref[ref]
+            else:
+                # Fallback grid, used only if placement could not run.
+                col, row = index % cols, index // cols
+                at_x = x0 + col * pitch
+                at_y = y0 + row * pitch
 
             definition = library.load(comp.footprint) if comp.footprint else None
             if definition is None:
@@ -326,7 +331,7 @@ class KiCadGenerator:
         footprints_block = "\n".join(footprints)
         tracks_block = "\n".join(tracks)
         nets_block = "\n".join(net_decls)
-        outline = self._render_board_outline()
+        outline = self._render_board_outline(board_size, placements)
 
         return f"""(kicad_pcb
   (version 20240108)
@@ -445,17 +450,84 @@ class KiCadGenerator:
                     )
         return tracks
 
+    def _plan_placement(self) -> Tuple[Dict[str, Tuple[float, float]], Tuple[float, float]]:
+        """
+        Decide where each component goes, using the smart placement engine.
+
+        Returns a mapping of reference designator to (x, y) and the required
+        board size (width, height). Placement considers collision avoidance,
+        thermal separation and signal-integrity grouping
+        (`src/pcb/smart_placement.py`).
+
+        On any failure this returns an empty mapping, and the caller falls back
+        to the simple grid so that PCB generation never fails because of the
+        placer.
+        """
+        try:
+            from src.pcb.smart_placement import SmartPlacer
+
+            # Start generous; the placer packs into the area it is given, and the
+            # outline is tightened afterwards from the real pads.
+            side = max(60.0, 25.0 * math.sqrt(max(len(self.circuit.components), 1)))
+            placer = SmartPlacer(
+                self.circuit, board_width=side, board_height=side * 0.8
+            )
+            placed = placer.place_all()
+        except Exception as exc:  # noqa: BLE001 - placement must never be fatal
+            logger.warning(
+                "Smart placement unavailable (%s: %s); falling back to a grid",
+                type(exc).__name__,
+                exc,
+            )
+            return {}, (180.0, 120.0)
+
+        positions = {ref: pc.position for ref, pc in placed.items()}
+        return positions, (side, side * 0.8)
+
     @staticmethod
-    def _render_board_outline() -> str:
-        """A plain rectangular board outline sized around the placement grid."""
-        left, top, right, bottom = 40.0, 40.0, 220.0, 160.0
+    def _render_board_outline(
+        board_size: Optional[Tuple[float, float]] = None,
+        placements: Optional[Dict[str, Dict[str, Tuple[float, float]]]] = None,
+    ) -> str:
+        """
+        A rectangular board outline sized around the actual placement.
+
+        The outline is derived from real pad coordinates with a margin, so the
+        board fits what is on it instead of using a fixed rectangle that may be
+        far larger (or smaller) than necessary.
+        """
+        margin = 5.0
+        xs: List[float] = []
+        ys: List[float] = []
+        for pads in (placements or {}).values():
+            for x, y in pads.values():
+                xs.append(x)
+                ys.append(y)
+
+        if xs and ys:
+            left, right = min(xs) - margin, max(xs) + margin
+            top, bottom = min(ys) - margin, max(ys) + margin
+        else:
+            width, height = board_size or (60.0, 40.0)
+            left, top, right, bottom = 0.0, 0.0, width, height
+
+        # Keep a sensible minimum size so a tiny circuit does not produce a
+        # board that is awkward to handle or fabricate.
+        min_side = 20.0
+        if right - left < min_side:
+            centre = (left + right) / 2
+            left, right = centre - min_side / 2, centre + min_side / 2
+        if bottom - top < min_side:
+            centre = (top + bottom) / 2
+            top, bottom = centre - min_side / 2, centre + min_side / 2
+
         corners = [
             (left, top), (right, top), (right, bottom), (left, bottom), (left, top),
         ]
         lines = []
         for (x1, y1), (x2, y2) in zip(corners, corners[1:]):
             lines.append(
-                f'  (gr_line (start {x1:g} {y1:g}) (end {x2:g} {y2:g}) '
+                f'  (gr_line (start {x1:.4f} {y1:.4f}) (end {x2:.4f} {y2:.4f}) '
                 f'(layer "Edge.Cuts") (width 0.1))'
             )
         return "\n".join(lines)
