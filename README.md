@@ -62,9 +62,9 @@ This project builds an AI-powered electronics design platform that transforms na
 - ⚠️ The built-in component catalog covers only common parts. The full
   jlcparts catalog is used automatically when its offline database is present,
   but it is **not** bundled — without it, part substitution is limited.
-- ⚠️ Several implemented subsystems are **not wired into the pipeline**:
-  smart PCB placement, the permission system, the sandbox, and the MCP agent.
-  See [`ROADMAP.md` §22](ROADMAP.md) for the verified list.
+- ⚠️ Three implemented subsystems are **not wired into the pipeline**: the
+  permission system, the process sandbox, and the free-form MCP agent. They have
+  tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
 - ⚠️ The requirement parser fills defaults for unspecified values instead of
   asking the user.
 - ⚠️ A working KiCad installation is required: symbol and footprint libraries
@@ -72,7 +72,6 @@ This project builds an AI-powered electronics design platform that transforms na
 
 ### Planned / In Progress
 
-- 🔄 DSN/SES path via `pcbnew`, plus a Java 25 runtime, to make auto-routing work
 - 🔄 Wiring the orphaned modules into the pipeline (placement first)
 - 🔄 Multi-turn clarification of missing requirements (the parser currently fills defaults)
 - 🔄 Datasheet understanding / RAG (section 8 of the ROADMAP)
@@ -88,8 +87,9 @@ This project builds an AI-powered electronics design platform that transforms na
 | Schematic + PCB + Gerbers | ✅ Works and is KiCad-verified |
 | SPICE simulation | ✅ Works |
 | Web frontend + collaboration | ✅ Implemented (builds, WebSocket server present) |
-| PCB autorouting | ⛔ Blocked (see above) |
-| Smart placement / permissions / sandbox / MCP agent | ⚠️ Implemented but not wired in |
+| PCB autorouting | ✅ Works (needs Java 25 + the FreeRouting jar) |
+| Smart component placement | ✅ Wired in — drives PCB layout and board outline |
+| Permissions / sandbox / MCP agent | ⚠️ Implemented but not wired in |
 | Datasheet understanding | ❌ Not started |
 
 **Built with open-source technologies.** (KiCad, ngspice and FreeRouting are used
@@ -321,7 +321,7 @@ git clone --depth 1 https://github.com/yaqwsx/jlcparts /tmp/refs/jlcparts
 | **Component DB** | JLCParts (yaqwsx/jlcparts) | MIT | ✅ Implemented |
 | **EDA Engine** | KiCad 8.x / 9.x (`kicad-cli`) | GPL-3.0 | ✅ Integrated |
 | **Schematic/PCB Gen** | Custom S-expression compiler | GPL-3.0 | ✅ Implemented |
-| **Routing** | FreeRouting | GPL-3.0 | ⛔ Blocked (Java 25 jars, Java 21 runtime) |
+| **Routing** | FreeRouting | GPL-3.0 | ✅ Working (needs Java 25 + the jar in `libs/freerouting/`) |
 | **Simulation** | ngspice | BSD-3-Clause | ✅ Integrated |
 | **CLI** | Python argparse | GPL-3.0 | ✅ Implemented |
 | **API** | FastAPI | MIT | ✅ Implemented |
@@ -449,7 +449,7 @@ python main.py -p "Create a 12V to 5V buck converter 3A output"
 | **KiCad** (9.x) | Schematic/PCB generation, ERC, DRC, Gerbers | Provides `kicad-cli` **and** the symbol/footprint libraries the generators read at runtime. `.kicad_sym` / `.kicad_footprint` data is not vendored — see `CREDITS.md` |
 | ngspice | SPICE simulation | Optional; simulation is reported as failed, not silently skipped, when absent |
 | Node.js 18+ | Web frontend only | Not needed for the CLI |
-| Java 25 | FreeRouting auto-routing | `sudo apt install openjdk-25-jdk`. Installs alongside Java 21; the default runtime does not change |
+| Java 25 | Auto-routing | `sudo apt install openjdk-25-jdk` (Debian trixie+, Ubuntu jammy+). Installs alongside Java 21 |
 
 Verify the system dependencies:
 
@@ -470,22 +470,54 @@ Install required system packages **once**:
 # Update package list
 sudo apt-get update
 
-# Install required system packages
+# Required
 sudo apt-get install -y \
     python3 python3-venv python3-dev \
     kicad \
-    ngspice \
-    kicad-footprints kicad-symbols kicad-templates
+    kicad-footprints kicad-symbols kicad-templates \
+    openjdk-25-jdk
 
-# Optional extras
-sudo apt-get install -y \
-    librepcb horizon-eda \
-    sch-rnd-sim pcb-rnd \
-    default-jre  # For FreeRouting (version mismatch — see Known Limitations)
+# Optional: SPICE simulation
+sudo apt-get install -y ngspice
+
+# Optional: virtual display, needed only by the MCP server's auto_route tool
+sudo apt-get install -y xvfb
+
+# Optional: alternative EDA tools, for comparison
+sudo apt-get install -y librepcb horizon-eda sch-rnd-sim pcb-rnd
 ```
 
-> On Debian/Ubuntu, `kicad-cli` ships inside the `kicad` package; installing a
-> separate `kicad-cli` package is not needed on current releases.
+> On Debian and Ubuntu, `kicad-cli` ships inside the `kicad` package; a separate
+> `kicad-cli` package is not needed on current releases.
+
+#### Why Java 25 (`openjdk-25-jdk`)
+
+Auto-routing needs it. The FreeRouting jars are compiled to Java class-file
+version 69, so an older runtime refuses to start them with
+`UnsupportedClassVersionError`. Java 21 is not enough.
+
+`openjdk-25-jdk` installs **alongside** any existing JDK; it does not remove
+Java 21. Note that installing it may make `java` point at 25 by default. This
+project does **not** rely on the default: it locates a Java 25+ runtime itself
+(`/usr/lib/jvm/java-*` and `JAVA_HOME`), so either default works.
+
+To check or change which JDK is the system default:
+
+```bash
+update-alternatives --list java          # what is installed
+sudo update-alternatives --config java   # choose the default interactively
+```
+
+#### Supported distributions
+
+* **Debian** — `openjdk-25-jdk` is available from **trixie (13)** onward.
+* **Ubuntu** and derivatives (Kubuntu, Xubuntu, Linux Mint, Pop!_OS, elementary,
+  Zorin, …) — `openjdk-25-jdk` is available from **jammy (22.04)** onward.
+
+The platform is developed and verified on Debian 13 (trixie) with KiCad 9.0.2,
+ngspice 44.2 and OpenJDK 25.0.4. Package names above are the Debian/Ubuntu ones;
+on other distributions install the equivalents (for example
+`java-25-openjdk` on Fedora).
 
 ### Python environment (one-time setup)
 
@@ -681,8 +713,9 @@ deactivate
 
 You'll see `(venv)` in your prompt while the environment is active.
 
-> PCB auto-routing is currently blocked, so `--no-routing` is the practical
-> default. See [Known Limitations](#known-limitations).
+> Auto-routing needs Java 25 and the FreeRouting jar (see
+> [System Dependencies](#system-dependencies-deb-packages)). Use `--no-routing`
+> if you have not set those up yet.
 
 ---
 
