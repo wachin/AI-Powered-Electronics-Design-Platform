@@ -38,6 +38,9 @@ class DesignRequest:
     project_name: str = "ai_generated_circuit"
     run_spice: bool = True
     run_routing: bool = True
+    # Ask an optional MCP server (kicad-mcp-server) for an independent ERC/DRC
+    # opinion on the generated project. Off by default: it needs `mcp-setup`.
+    mcp_validate: bool = False
 
 
 @dataclass
@@ -55,6 +58,7 @@ class DesignSummary:
     topology: str = ""
     design_notes: List[str] = field(default_factory=list)
     validation: Optional[Dict[str, Any]] = None
+    mcp_validation: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -69,6 +73,8 @@ class DesignSummary:
         }
         if self.validation is not None:
             result["validation"] = self.validation
+        if self.mcp_validation is not None:
+            result["mcp_validation"] = self.mcp_validation
         if self.spice_result:
             result["spice_result"] = {
                 "success": self.spice_result.success,
@@ -193,6 +199,14 @@ class AIDesignOrchestrator:
         except Exception as e:
             print(f"   ⚠️  3D export failed: {e}")
 
+        # Step 8: optional independent check via an MCP server.
+        mcp_validation = None
+        if getattr(request, "mcp_validate", False):
+            print("\n🔎 Step 8: Independent validation via MCP server...")
+            mcp_validation = await self._run_mcp_validation(
+                generated_files, output_dir, request.project_name
+            )
+
         print("\n" + "=" * 60)
         print("🎉 Design synthesis complete!")
         print("=" * 60)
@@ -211,7 +225,44 @@ class AIDesignOrchestrator:
             validation=result.get("validation").to_dict()
             if result.get("validation") is not None
             else None,
+            mcp_validation=mcp_validation,
         )
+
+    async def _run_mcp_validation(
+        self, generated_files: Dict[str, Path], output_dir: Path, project_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Ask an MCP server to validate the generated project independently.
+
+        Failure here never aborts the design: the deterministic checks have
+        already run, and this is an additional opinion.
+        """
+        from src.agents.mcp_validation import validate_with_mcp
+
+        try:
+            outcome = await validate_with_mcp(
+                files=generated_files,
+                workspace=Path(output_dir) / "mcp_workspace",
+                project_name=project_name,
+            )
+        except Exception as exc:  # noqa: BLE001 - never break generation
+            print(f"   ⚠️  MCP validation unavailable: {exc}")
+            return {"available": False, "error": str(exc)}
+
+        if not outcome.available:
+            print(f"   ⚠️  MCP validation skipped: {outcome.error}")
+        else:
+            status = "✅ no design violations" if outcome.violations == 0 else (
+                f"{outcome.violations} finding(s)"
+            )
+            print(f"   ERC violations: {(outcome.erc or {}).get('violations')}")
+            print(f"   DRC violations: {(outcome.drc or {}).get('violations')} ({status})")
+            if outcome.only_library_warnings:
+                print(
+                    "   Note: DRC findings are KiCad library-table notices only "
+                    "(the board embeds its footprints)."
+                )
+        return outcome.to_dict()
 
     def _synthesize_circuit_ir(self, prompt: str, project_name: str) -> CircuitIR:
         """

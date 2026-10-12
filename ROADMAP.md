@@ -993,9 +993,14 @@ Create a phased roadmap:
 
 ## Phase 14 — Advanced AI hardware engineer
 
-- [~] **ORPHANED** - AIDesignAgent with MCP integration exists
-  (src/agents/ai_agent.py, src/agents/mcp_client.py) and has tests, but **no
-  API route or CLI flag reaches it**; only tests import it. See section 22.
+- [~] **PARTIALLY WIRED (2026-10)** - MCP integration now reachable:
+  `ai-electronics-design mcp-setup` / `mcp-status` create and inspect isolated
+  per-server environments, and `--mcp-validate` runs an independent ERC/DRC check
+  on the generated project (`src/agents/mcp_registry.py`, `mcp_servers.py`,
+  `mcp_validation.py`). Verified against a generated LDO: ERC 0 violations, DRC
+  only library-table notices.
+  - [ ] Still not wired: the free-form `AIDesignAgent` planner in `ai_agent.py`
+    (its MCP tool wrappers are reachable, but no API route or CLI flag drives it)
   - Rule-based planning for LDO, buck, boost, LED circuits
   - MCP client for KiCad MCP server (stdio transport, JSON-RPC 2.0)
   - KiCadMCPTools wrapper with 40+ tool wrappers (schematic, PCB, netlist, validation, editing, parts registry)

@@ -6,6 +6,11 @@ that an installed copy exposes a working console command:
 
     ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED"
 
+    # Optional MCP servers (isolated environments, not required for design)
+    ai-electronics-design mcp-status
+    ai-electronics-design mcp-setup
+    ai-electronics-design mcp-setup --server pcbparts
+
 The root-level `main.py` is a thin shim that calls :func:`main` here, so both
 invocation styles behave identically.
 """
@@ -20,6 +25,49 @@ from pathlib import Path
 
 from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest
 from src.components.database import ComponentDatabase
+
+
+
+SUBCOMMANDS = ("mcp-status", "mcp-setup")
+
+
+def _run_mcp_status() -> int:
+    """Report which optional MCP servers are available."""
+    from src.agents.mcp_servers import MCPServerManager, render_status
+
+    print(render_status(MCPServerManager().report()))
+    return 0
+
+
+def _run_mcp_setup(servers: list[str] | None, verbose: bool) -> int:
+    """
+    Create isolated environments for the optional MCP servers.
+
+    Each server gets its own virtual environment, so their conflicting
+    dependencies never meet. Nothing here is required to generate a design.
+    """
+    from src.agents.mcp_servers import MCPServerManager
+
+    manager = MCPServerManager(verbose=verbose)
+    print("Setting up optional MCP servers (isolated environments)...")
+    results = manager.install_all(servers)
+
+    failures = 0
+    for result in results:
+        if result.ok:
+            note = "created environment, " if result.created_venv else ""
+            print(f"  ✅ {result.key}: {note}installed {', '.join(result.installed)}")
+            if result.command:
+                print(f"     launch: {' '.join(result.command)}")
+        else:
+            failures += 1
+            print(f"  ❌ {result.key}: {result.error}")
+    print()
+    if failures:
+        print(f"{failures} server(s) could not be set up. See the messages above.")
+        return 1
+    print("All requested servers are ready. Check with: ai-electronics-design mcp-status")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -100,6 +148,14 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--mcp-validate",
+        action="store_true",
+        help=(
+            "Also validate the generated project with an MCP server "
+            "(needs: ai-electronics-design mcp-setup)"
+        ),
+    )
+    parser.add_argument(
         "--no-spice",
         action="store_true",
         help="Disable SPICE simulation (ngspice)",
@@ -139,6 +195,7 @@ async def _run(args: argparse.Namespace) -> int:
         project_name=args.project_name,
         run_spice=not args.no_spice,
         run_routing=not args.no_routing,
+        mcp_validate=args.mcp_validate,
     )
     summary = await orchestrator.process_request(request, output_dir)
 
@@ -193,6 +250,26 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # Subcommands take precedence over the design-generation flags.
+    if argv and argv[0] in SUBCOMMANDS:
+        command, rest = argv[0], argv[1:]
+        if command == "mcp-status":
+            return _run_mcp_status()
+
+        sub = argparse.ArgumentParser(prog="ai-electronics-design mcp-setup")
+        sub.add_argument(
+            "--server",
+            action="append",
+            choices=["kicad", "pcbparts"],
+            dest="servers",
+            help="Only set up this server (repeatable). Default: all.",
+        )
+        sub.add_argument("-v", "--verbose", action="store_true")
+        sub_args = sub.parse_args(rest)
+        return _run_mcp_setup(sub_args.servers, sub_args.verbose)
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -42,6 +42,21 @@ dev = [
     "pytest-cov>=5.0.0",
 ]
 
+# Optional: MCP servers for extra analysis/validation tools.
+#
+# These are NOT installed into this environment. Each server runs as its own
+# subprocess in an isolated virtual environment (see src/agents/mcp_servers.py),
+# because they have mutually incompatible `mcp` version requirements.
+# Declared here for discoverability and version pinning only.
+mcp = [
+    "kicad-mcp-server>=3.5.0",
+]
+
+# Convenience umbrella for contributors.
+all = [
+    "ai-electronics-design-platform[dev,mcp]",
+]
+
 [project.scripts]
 ai-electronics-design = "src.cli:main"
 

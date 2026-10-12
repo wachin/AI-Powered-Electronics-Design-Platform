@@ -8,7 +8,7 @@
 -->
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-199%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-224%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -95,7 +95,7 @@ This project builds an AI-powered electronics design platform that transforms na
 | Datasheet understanding | ❌ Not started |
 
 **Built with open-source technologies.** (KiCad, ngspice and FreeRouting are used
-as external programs; AI features can talk to hosted providers if you configure
+as  programs; AI features can talk to hosted providers if you configure
 one, or run fully locally with Ollama.)
 
 ---
@@ -286,7 +286,7 @@ Output and verification:
 - Component database (`src/components/database.py`, `jlcparts.py`)
 - Orchestrator, FastAPI backend, CLI (`src/agents/orchestrator.py`, `src/api/main.py`, `src/cli.py`)
 
-### 🔧 Used as external programs (not linked)
+### 🔧 Used as  programs (not linked)
 
 - **KiCad** (`kicad-cli`) — netlist export, ERC, DRC, Gerber/drill export.
   Note: **no DSN export or SES import** — those `kicad-cli` subcommands do not
@@ -297,7 +297,7 @@ Output and verification:
 - **FreeRouting** — PCB autorouter (Java JAR). Not currently runnable; see Known Limitations.
 - **yaqwsx/jlcparts** — offline component catalog (MIT, SQLite).
 
-### 📦 External references (in `external/`, reference only)
+### 📦  references (in `/`, reference only)
 
 32 Git submodules are available for study — none are imported, linked, or
 required. Highlights: `kicad`, `kicad-tools`, `kicad-mcp-server`, `circuit-json`,
@@ -413,8 +413,13 @@ Options:
   --base-url TEXT           Provider base URL (e.g. http://localhost:11434)
   --max-repairs INT         How many times an invalid design is sent back (default: 2)
   --strict                  Fail instead of falling back to the template generator
+  --mcp-validate            Also validate with an MCP server (needs mcp-setup)
   --no-spice                Disable SPICE simulation
   --no-routing              Disable PCB auto-routing
+
+Subcommands:
+  mcp-status                Show optional MCP server availability
+  mcp-setup [--server X]    Create isolated environments for MCP servers
 ```
 
 The CLI exits with status `1` and a clear message when a design cannot be made
@@ -496,8 +501,8 @@ kicad-cli --version
 ngspice --version
 ```
 
-The `external/` submodules are **not** installed and are **not** dependencies.
-Do not `pip install -e external/...`: those repositories exist only to be read,
+The `/` submodules are **not** installed and are **not** dependencies.
+Do not `pip install -e /...`: those repositories exist only to be read,
 and installing them risks version conflicts (for example `kicad-mcp-server` and
 `pcbparts-mcp` require mutually exclusive versions of `mcp`). See `AGENTS.md`.
 
@@ -509,6 +514,71 @@ git submodule update --init --recursive   # optional, reference material only
 
 ---
 
+
+## Optional MCP Servers (Analysis & Validation)
+
+Beyond the built-in checks, the platform can drive external
+[MCP](https://modelcontextprotocol.io) servers for a **second, independent
+opinion** on a generated design. This is optional — design generation does not
+need it.
+
+```bash
+ai-electronics-design mcp-status                        # what is available
+ai-electronics-design mcp-setup                         # set up all servers
+ai-electronics-design mcp-setup --server kicad          # or just one
+
+# Then ask for the extra validation during generation
+ai-electronics-design -p "Design a 5V to 3.3V LDO regulator" --mcp-validate
+```
+
+### Why each server gets its own virtual environment
+
+MCP servers are separate processes speaking JSON-RPC over stdio, so they do not
+share a Python environment with this project. That matters because they have
+**mutually incompatible dependencies**: `kicad-mcp-server` requires
+`mcp[cli]>=1.27,<2`, while `pcbparts-mcp` pins `mcp==1.25.0`.
+
+Installing both into one environment is what produces the conflict noted in this
+project's history. Giving each server its own environment under `.mcp_envs/`
+removes the conflict entirely — no forks, no patched pins, no version
+negotiation.
+
+### Servers
+
+| Server | License | What it adds |
+|---|---|---|
+| `kicad` — [kicad-mcp-server](https://pypi.org/project/kicad-mcp-server/) | MIT | 23 tools: ERC, DRC, board info, netlist/SPICE export, Gerber/drill, STEP/3D, SVG/PDF, JLCPCB packaging, `auto_route` |
+| `pcbparts` — `pcbparts-mcp` | MIT | Cross-distributor part search (JLCPCB/Mouser/DigiKey), parametric filtering, alternatives, PCB design rules, ~285 reference boards |
+
+### The `pcbnew` detail
+
+`kicad-mcp-server` needs KiCad's native Python bindings for board analysis,
+`auto_route` and the STEP/3D exports. Those bindings ship with KiCad, not with a
+virtual environment. The launcher therefore runs the server with a **system**
+interpreter that has `pcbnew`, while the server's own packages stay isolated and
+are exposed through `PYTHONPATH`. Using this project's interpreter instead would
+silently disable those tools.
+
+### Verified behaviour
+
+Against a generated LDO project:
+
+```
+ERC violations: 0
+DRC violations: 5  (KiCad library-table notices only — the board embeds its footprints)
+```
+
+`get_board_info` correctly reported the generated board (5 components, 5 nets).
+The DRC notices appear because KiCad's *global* footprint library table is not
+populated; they are an environment notice, not a defect, and the code labels them
+as such.
+
+`auto_route` is present but **still blocked**: it needs a FreeRouting jar
+(`KICAD_MCP_FREEROUTING_JAR`), and every jar bundled in `external/freerouting/`
+is compiled for **Java 25** while this machine has Java 21. Same blocker as the
+built-in router — see [Known Limitations](#known-limitations).
+
+---
 
 ## Daily Usage (Every Session)
 
@@ -637,7 +707,7 @@ python -c "import src; print('Python imports OK')"
 
 ---
 
-## External Submodules (Reference Only)
+##  Submodules (Reference Only)
 
 The `external/` directory contains Git submodules for reference only. They are **not required** for the main platform to function:
 
