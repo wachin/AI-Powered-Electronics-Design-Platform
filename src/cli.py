@@ -11,6 +11,10 @@ that an installed copy exposes a working console command:
     ai-electronics-design mcp-setup
     ai-electronics-design mcp-setup --server pcbparts
 
+    # Component catalog (~180,000 in-stock parts, for real part selection)
+    ai-electronics-design catalog-status
+    ai-electronics-design catalog-setup
+
 The root-level `main.py` is a thin shim that calls :func:`main` here, so both
 invocation styles behave identically.
 """
@@ -28,7 +32,7 @@ from src.components.database import ComponentDatabase
 
 
 
-SUBCOMMANDS = ("mcp-status", "mcp-setup")
+SUBCOMMANDS = ("mcp-status", "mcp-setup", "catalog-status", "catalog-setup")
 
 
 def _run_mcp_status() -> int:
@@ -67,6 +71,58 @@ def _run_mcp_setup(servers: list[str] | None, verbose: bool) -> int:
         print(f"{failures} server(s) could not be set up. See the messages above.")
         return 1
     print("All requested servers are ready. Check with: ai-electronics-design mcp-status")
+    return 0
+
+
+
+def _run_catalog_status() -> int:
+    """Report whether the component catalog is available and how big it is."""
+    from src.components.database import ComponentDatabase
+    from src.components.jlcparts import default_catalog_path, JLCPartsDatabase
+
+    db = ComponentDatabase()
+    print("Component catalog:")
+    print(f"  source : {db.data_source}")
+    print(f"  parts  : {db.catalog_size:,}")
+    if db.using_jlcparts:
+        print(f"  path   : {JLCPartsDatabase().db_path}")
+        print("  status : full offline catalog in use")
+    else:
+        print(f"  expected path: {default_catalog_path()}")
+        print("  status : built-in fallback catalog only "
+              "(common parts, no stock or price data)")
+        print()
+        print("Download the full catalog with: ai-electronics-design catalog-setup")
+    return 0
+
+
+def _run_catalog_setup(force: bool, verbose: bool, dest: str | None = None) -> int:
+    """
+    Download the offline component catalog.
+
+    Roughly 145 MB, containing about 180,000 in-stock JLCPCB/LCSC parts with
+    stock levels, tiered pricing, datasheets and parametric attributes. It is
+    optional — the platform works without it — but part selection and
+    substitution are far better with it.
+    """
+    from src.components.jlcparts import download_catalog, default_catalog_path
+
+    try:
+        from pathlib import Path as _Path
+
+        path = download_catalog(
+            dest=_Path(dest) if dest else None, force=force, progress=True
+        )
+    except RuntimeError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nInterrupted; the partial download was removed.", file=sys.stderr)
+        return 130
+
+    print()
+    print(f"Installed at: {path}")
+    print("Check it with: ai-electronics-design catalog-status")
     return 0
 
 
@@ -264,6 +320,26 @@ def main(argv: list[str] | None = None) -> int:
         command, rest = argv[0], argv[1:]
         if command == "mcp-status":
             return _run_mcp_status()
+        if command == "catalog-status":
+            return _run_catalog_status()
+        if command == "catalog-setup":
+            catalog = argparse.ArgumentParser(prog="ai-electronics-design catalog-setup")
+            catalog.add_argument(
+                "--force",
+                action="store_true",
+                help="Download again even if a catalog is already installed",
+            )
+            catalog.add_argument(
+                "--dest",
+                default=None,
+                help=(
+                    "Where to install the catalog "
+                    "(default: $XDG_CACHE_HOME/kicad-tools/jlcparts.sqlite3)"
+                ),
+            )
+            catalog.add_argument("-v", "--verbose", action="store_true")
+            c_args = catalog.parse_args(rest)
+            return _run_catalog_setup(c_args.force, c_args.verbose, c_args.dest)
 
         sub = argparse.ArgumentParser(prog="ai-electronics-design mcp-setup")
         sub.add_argument(

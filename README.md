@@ -8,7 +8,7 @@
 -->
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-243%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-249%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -59,9 +59,11 @@ This project builds an AI-powered electronics design platform that transforms na
   Verified working: 30 tracks routed, **0 unconnected pads**, on a generated
   board. Without these, generation still succeeds and routing reports a clear
   error instead of failing silently.
-- ⚠️ The built-in component catalog covers only common parts. The full
-  jlcparts catalog is used automatically when its offline database is present,
-  but it is **not** bundled — without it, part substitution is limited.
+- ⚠️ **The full component catalog is a separate 145 MB download.** Without it
+  the platform uses a built-in catalog of 38 common parts, so part selection and
+  substitution are limited to those. Install it with
+  `ai-electronics-design catalog-setup` (see
+  [Component Catalog](#component-catalog-180000-real-parts)).
 - ⚠️ Three implemented subsystems are **not wired into the pipeline**: the
   permission system, the process sandbox, and the free-form MCP agent. They have
   tests but nothing calls them. See [`ROADMAP.md` §22](ROADMAP.md).
@@ -421,6 +423,8 @@ Options:
   --no-routing              Disable PCB auto-routing
 
 Subcommands:
+  catalog-status            Show the component catalog in use
+  catalog-setup [--dest P]  Download the full component catalog (~145 MB)
   mcp-status                Show optional MCP server availability
   mcp-setup [--server X]    Create isolated environments for MCP servers
 ```
@@ -547,6 +551,82 @@ Nothing needs to be present for the build, the tests or the runtime.
 
 ---
 
+
+## Component Catalog (180,000+ real parts)
+
+The platform selects parts from an offline catalog of **real, in-stock,
+purchasable components**. Install it once:
+
+```bash
+ai-electronics-design catalog-setup      # ~145 MB download
+ai-electronics-design catalog-status     # confirm it is in use
+```
+
+```text
+Component catalog:
+  source : JLCPCB/LCSC offline catalog (179,894 parts)
+  parts  : 179,894
+  status : full offline catalog in use
+```
+
+### What it gives you
+
+| Data | Why it matters |
+|---|---|
+| **Real LCSC part numbers** | Every part in the BOM can actually be ordered |
+| **Stock levels** | You will not design around a part with zero stock |
+| **Tiered pricing** | Real cost estimates for the BOM |
+| **Package, manufacturer, datasheet** | Enough to verify a part before buying |
+| **Parametric attributes** (JSON) | Resistance, tolerance, voltage, power — the basis for finding a substitute |
+
+Coverage of in-stock parts, by category:
+
+| Category | Parts available |
+|---|---|
+| Resistors | 8,219 |
+| Capacitors | 6,908 |
+| Diodes | 4,422 |
+| Regulators | 3,061 |
+| LEDs | 1,789 |
+| MOSFETs / transistors | 838 |
+| Microcontrollers | 430 |
+
+### Where it comes from
+
+The catalog is built from the [yaqwsx/jlcparts](https://github.com/yaqwsx/jlcparts)
+dataset (MIT). That upstream dataset is a ~10 GB multi-volume archive most zip
+libraries cannot open, so this project fetches
+[CDFER/jlcpcb-parts-database](https://github.com/CDFER/jlcpcb-parts-database),
+which republishes the same data as a single SQLite file, rebuilt daily by GitHub
+Actions and filtered to parts with stock.
+
+### Configuration
+
+The catalog is looked up in this order:
+
+1. `$JLC_PARTS_CATALOG` — an explicit file path
+2. `$XDG_CACHE_HOME/kicad-tools/jlcparts.sqlite3` (default `~/.cache/...`)
+3. `<repository>/jlcparts.sqlite3`
+4. `/tmp/jlcparts.sqlite3`
+
+To install it elsewhere:
+
+```bash
+ai-electronics-design catalog-setup --dest /path/to/jlcparts.sqlite3
+export JLC_PARTS_CATALOG=/path/to/jlcparts.sqlite3
+```
+
+The download goes to a temporary file and is verified (it must open and contain
+components) before replacing anything, so an interrupted transfer cannot leave a
+half-written catalog silently degrading part selection.
+
+### It is optional
+
+Design generation works without it, using a built-in catalog of 38 common parts.
+You lose real stock, real pricing and reliable substitution — the design may
+still be valid, but its BOM is not guaranteed to be orderable.
+
+---
 
 ## Optional MCP Servers (Analysis & Validation)
 
@@ -821,12 +901,16 @@ There are only **two** things to install, and neither is a clone:
 # 1. The platform and its Python dependencies
 pip install -e ".[dev]"
 
-# 2. Optional: the MCP servers, in their own isolated environments
+# 2. Recommended: the component catalog (~145 MB, ~180,000 real parts)
+ai-electronics-design catalog-setup
+
+# 3. Optional: the MCP servers, in their own isolated environments
 ai-electronics-design mcp-setup
 
 # Verify
-pytest -q                              # 234 tests
-ai-electronics-design mcp-status       # optional servers
+pytest -q                                # tests
+ai-electronics-design catalog-status     # component catalog
+ai-electronics-design mcp-status         # optional servers
 ```
 
 Plus two system packages, which are not Python and cannot come from pip:

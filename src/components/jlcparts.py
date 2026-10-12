@@ -8,6 +8,7 @@ Supports the yaqwsx/jlcparts SQLite dataset.
 import sqlite3
 import logging
 from pathlib import Path
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -223,16 +224,32 @@ class JLCPartsDatabase:
         self._catalog_available = self.db_path is not None and self.db_path.exists()
 
     def _find_catalog(self) -> Optional[Path]:
-        """Find the jlcparts SQLite catalog in standard locations."""
-        candidates = [
-            Path.home() / ".cache" / "kicad-tools" / "jlcparts.sqlite3",
+        """
+        Locate the component catalog, in order of preference.
+
+        The `JLC_PARTS_CATALOG` environment variable wins, which makes it easy to
+        point at a catalog kept somewhere unusual. Repository-relative paths come
+        next, so running from the project directory finds a checked-out catalog,
+        and the per-user cache is the normal location.
+        """
+        import os
+
+        candidates: List[Path] = []
+        from_env = os.environ.get("JLC_PARTS_CATALOG")
+        if from_env:
+            candidates.append(Path(from_env))
+
+        candidates += [
+            default_catalog_path(),
             Path.home() / ".jlcparts" / "jlcparts.sqlite3",
+            # Repository root, independent of the current working directory.
+            Path(__file__).resolve().parents[2] / "jlcparts.sqlite3",
             Path("/tmp") / "jlcparts.sqlite3",
-            Path.cwd() / "jlcparts.sqlite3",
         ]
-        for c in candidates:
-            if c.exists():
-                return c
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
         return None
 
     @property
@@ -525,80 +542,160 @@ class JLCPartsDatabase:
             return 0
 
 
+# Where the catalog comes from.
+#
+# The upstream yaqwsx/jlcparts dataset is a ~10 GB multi-volume zip that most zip
+# libraries cannot open, and its old download URL no longer resolves. CDFER's
+# republished copy carries the same data, rebuilt daily by GitHub Actions, as a
+# single SQLite file filtered to parts that are in stock.
+CATALOG_URL = (
+    "https://cdfer.github.io/jlcpcb-parts-database/jlcpcb-components.sqlite3"
+)
+CATALOG_CSV_URL = (
+    "https://cdfer.github.io/jlcpcb-parts-database/"
+    "jlcpcb-components-basic-preferred.csv"
+)
+CATALOG_SCHEMA_FORMAT = "source-db-v2"
+
+
+def default_catalog_path() -> Path:
+    """
+    Standard location for the downloaded catalog.
+
+    Follows the XDG base-directory convention, so setting ``XDG_CACHE_HOME``
+    relocates it. ``JLC_PARTS_CATALOG`` overrides discovery entirely (see
+    ``JLCPartsDatabase._find_catalog``).
+    """
+    import os
+
+    cache_root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_root) if cache_root else Path.home() / ".cache"
+    return base / "kicad-tools" / "jlcparts.sqlite3"
+
+
 def download_catalog(
     dest: Optional[Path] = None,
-    base_url: str = "https://yaqwsx.github.io/jlcparts/data",
+    url: str = CATALOG_URL,
     force: bool = False,
-    progress: bool = True
+    progress: bool = True,
+    timeout: float = 1800.0,
 ) -> Path:
     """
-    Download and assemble the jlcparts catalog from yaqwsx/jlcparts dataset.
-    
-    This downloads the split-zip SQLite dataset (hundreds of MB) from GitHub Pages.
+    Download the SQLite component catalog.
+
+    Fetches a single ~145 MB SQLite file holding roughly 180,000 in-stock
+    JLCPCB/LCSC parts, verifies that it opens and contains components, then
+    installs it at ``dest``.
+
+    The transfer goes to a temporary file first and is promoted only after
+    verification, so an interrupted download can never leave a half-written
+    catalog silently degrading search results.
+
+    Args:
+        dest: Where to install the catalog. Defaults to
+            ``~/.cache/kicad-tools/jlcparts.sqlite3``.
+        url: Override the download URL.
+        force: Download again even if a catalog is already present.
+        progress: Print progress to stdout.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Path to the installed catalog.
+
+    Raises:
+        RuntimeError: if the download fails or the file is not a usable catalog.
     """
     import requests
-    import zipfile
-    import zlib
-    import struct
 
-    dest = dest or Path.home() / ".cache" / "kicad-tools" / "jlcparts.sqlite3"
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest = Path(dest) if dest else default_catalog_path()
+
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot write to {dest.parent} ({exc}). "
+            f"Choose another location with --dest, or set XDG_CACHE_HOME or "
+            f"JLC_PARTS_CATALOG to a writable directory."
+        ) from exc
+
+    # Fail early with a clear message rather than after a 145 MB transfer.
+    if not os.access(dest.parent, os.W_OK):
+        raise RuntimeError(
+            f"{dest.parent} is not writable. Choose another location with "
+            f"--dest, or set XDG_CACHE_HOME or JLC_PARTS_CATALOG."
+        )
+
+    def log(message: str) -> None:
+        if progress:
+            print(message)
 
     if dest.exists() and not force:
-        if progress:
-            print(f"Catalog already exists: {dest}")
-        return dest
-
-    def log(msg: str):
-        if progress:
-            print(msg)
-
-    log(f"Discovering dataset segments at {base_url}...")
-
-    # Discover split parts (cache.z01, cache.z02, ..., cache.zip)
-    part_urls = []
-    index = 1
-    while True:
-        url = f"{base_url}/cache.z{index:02d}"
         try:
-            resp = requests.head(url, timeout=30, allow_redirects=True)
-            if resp.status_code == 404:
-                break
-            resp.raise_for_status()
-            part_urls.append(url)
-            index += 1
-            if index > 100:
-                break
-        except requests.RequestException:
-            break
+            count = JLCPartsDatabase(dest).count()
+            log(f"Catalog already present: {dest} ({count:,} components)")
+            return dest
+        except Exception:
+            log(f"Existing catalog at {dest} is unusable; downloading again")
 
-    part_urls.append(f"{base_url}/cache.zip")
-    log(f"Found {len(part_urls)} archive segment(s).")
+    partial = dest.with_suffix(".download.part")
+    partial.unlink(missing_ok=True)
 
-    # Download and concatenate
-    combined_zip = dest.with_suffix(".download.zip")
-    total_bytes = 0
+    log(f"Downloading component catalog (~145 MB) from {url}")
     try:
-        with combined_zip.open("wb") as out:
-            for idx, url in enumerate(part_urls, 1):
-                log(f"  [{idx}/{len(part_urls)}] Downloading...")
-                with requests.get(url, stream=True, timeout=120) as resp:
-                    resp.raise_for_status()
-                    for chunk in resp.iter_content(chunk_size=1 << 20):
-                        if chunk:
-                            out.write(chunk)
-                            total_bytes += len(chunk)
-        log(f"Downloaded {total_bytes / (1 << 20):.1f} MiB")
+        with requests.get(url, stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length") or 0)
+            written = 0
+            reported = 0
+            with partial.open("wb") as out:
+                for chunk in response.iter_content(chunk_size=1 << 20):
+                    if not chunk:
+                        continue
+                    out.write(chunk)
+                    written += len(chunk)
+                    if progress and total and written - reported >= (10 << 20):
+                        reported = written
+                        print(
+                            f"  {written / (1 << 20):5.1f} / "
+                            f"{total / (1 << 20):.1f} MiB "
+                            f"({written * 100 // total}%)"
+                        )
+    except Exception as exc:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Could not download the component catalog from {url}: {exc}"
+        ) from exc
 
-        # Extract
-        log("Extracting SQLite database...")
-        _extract_catalog(combined_zip, dest)
-    finally:
-        combined_zip.unlink(missing_ok=True)
+    log(f"Downloaded {partial.stat().st_size / (1 << 20):.1f} MiB; verifying...")
 
-    count = JLCPartsDatabase(dest).count()
+    count = 0
+    try:
+        probe = JLCPartsDatabase(partial)
+        count = probe.count()
+        if count <= 0:
+            raise RuntimeError("the catalog contains no components")
+    except Exception as exc:
+        for leftover in _sqlite_sidecars(partial):
+            leftover.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Downloaded file is not a usable catalog ({exc}); it may be an "
+            "error page or a truncated transfer"
+        ) from exc
+
+    partial.replace(dest)
+    # Opening the file to verify it can create -wal/-shm sidecars; clean up the
+    # ones that belonged to the temporary name.
+    for leftover in _sqlite_sidecars(partial):
+        leftover.unlink(missing_ok=True)
+
     log(f"Catalog ready: {dest} ({count:,} components)")
     return dest
+
+
+def _sqlite_sidecars(path: Path) -> List[Path]:
+    """Return the -wal/-shm files SQLite may have created for `path`."""
+    return [Path(f"{path}-wal"), Path(f"{path}-shm")]
 
 
 # Split archive extraction helpers
