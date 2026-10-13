@@ -272,9 +272,15 @@ class TestRowConversion:
         assert db.lookup("C1001").is_preferred is False
 
     def test_symbol_matches_the_internal_category(self, db):
+        """
+        The symbol is a real KiCad symbol. ``Regulator_Linear:LDO_Generic`` — what
+        this used to assert — does not exist in any KiCad library, so a part that
+        used it could not be drawn.
+        """
         assert db.lookup("C1001").symbol == "Device:R"
         assert db.lookup("C2001").symbol == "Device:C"
-        assert db.lookup("C4001").symbol == "Regulator_Linear:LDO_Generic"
+        assert db.lookup("C4001").symbol.startswith("Regulator_")
+        assert "_Generic" not in db.lookup("C4001").symbol
 
     def test_footprint_matches_the_package(self, db):
         assert db.lookup("C1001").footprint == "Resistor_SMD:R_0603_1608Metric"

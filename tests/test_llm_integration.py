@@ -235,7 +235,10 @@ class TestCircuitSpecificationGenerator:
         assert len(spec.components) >= 5
 
         roles = {c.role for c in spec.components}
-        assert "controller" in roles
+        # The role names the topology. A bare "controller" is ambiguous and
+        # resolves to a generic chip with no category, no symbol and no pins,
+        # which drops every connection to it.
+        assert "buck_controller" in roles
         assert "inductor" in roles
         assert "input_capacitor" in roles
         assert "output_capacitor" in roles
@@ -260,7 +263,7 @@ class TestCircuitSpecificationGenerator:
 
         assert spec.topology == "boost"
         roles = {c.role for c in spec.components}
-        assert "controller" in roles
+        assert "boost_controller" in roles
         assert "inductor" in roles
 
     @pytest.mark.asyncio

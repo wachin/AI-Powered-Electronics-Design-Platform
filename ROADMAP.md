@@ -629,11 +629,70 @@ Find open-source projects that could help.
   thermal question re-fired after being answered with the default, for ever.
 - [x] **VERIFIED** - The answers reach the design: answering 12 V / 5 V / 1 A
   produces a design that drops 7 V, not the 1.7 V of the 5 V default.
-- [ ] **OPEN** - The clarification cannot offer a switching topology, because
-  ``buck`` and ``boost`` resolve their controller with no pins and fail
-  validation. A question must not offer an answer that leads to a broken design,
-  so the available topologies are listed and the unusable ones are named with the
-  reason.
+- [x] **FIXED** - ``buck`` and ``boost`` now build a valid design, and the
+  clarification offers them. The cause was one word: the generated specs used
+  ``role="controller"``, which is genuinely ambiguous and resolves to a generic
+  chip — no category, so no symbol, so no pins, so every connection to the
+  controller was dropped and the ERC failed with 10-12 errors. The role now names
+  the topology (``buck_controller``, ``boost_controller``), which resolves the
+  symbol and its pins. ``tests/test_topologies.py`` builds every offered topology
+  and requires it to pass, so an advertised feature cannot be an unbuildable one.
+
+## KiCad symbol and footprint names
+
+- [x] **FIXED** - **26 of the 45 category symbols did not exist.** KiCad ships no
+  generic IC symbols, and ``_category_to_symbol`` invented names like
+  ``Regulator_Linear:LDO_Generic``, ``MCU_Microcontroller:MCU_Generic``,
+  ``Device:Q_NPN_BEC`` (today ``Transistor_BJT:``) and ``Crystal:Crystal`` (today
+  ``Device:``). Every one is now a real KiCad symbol used as an archetype, and
+  ``tests/test_kicad_names.py`` reads the installed libraries to prove it.
+- [x] **FIXED** - **5 of the 36 component templates pointed at symbols KiCad does
+  not have**: ``Regulator_Linear:LM7805`` (real name ``LM7805_TO220``),
+  ``Regulator_Switching:LM2596`` (``LM2596S-5``),
+  ``MCU_ST_STM32F1:STM32F103C8T6`` (``STM32F103C8Tx``), and ``LM317L`` /
+  ``LM337L`` (the ``_TO92`` variants the templates' packages actually use).
+- [x] **IMPLEMENTED** - The pins declared for an archetype are verified to exist
+  on that symbol: 0 incompatibilities across all 45 categories. A symbol and a
+  pin list that disagree produce a netlist that looks right and is not.
+- [x] **IMPLEMENTED** - An unknown category now gets **no symbol** instead of
+  ``Device:R``, which used to draw a resistor for a part the platform had not
+  understood.
+- [x] **VERIFIED** - The consequence, end to end: a design that resolves its parts
+  from the catalogue (`12V to 3.3V LDO at 0.05A`) used to fail with
+  ``symbol library not found`` and now passes the ERC with 0 errors.
+- [ ] **OPEN** - Three templates have no pinout: ``ESP32``, ``STM32F103`` and
+  ``RP2040``. A microcontroller has tens of pins and their assignment is not in
+  the catalogue, so the platform reports "no known pinout" rather than inventing
+  one. The gap is asserted by name in the test, so it cannot grow quietly.
+
+---
+
+- [x] **IMPLEMENTED** - Manufacturing output (`src/generators/fabrication.py`).
+  The pipeline produced a ``.kicad_pcb``, which no board house accepts, and the
+  ROADMAP recorded Gerber export as "verified" because it had been run by hand
+  with `kicad-cli` — there was no code that produced them, no drill files, and no
+  position file, without which an assembly service cannot place anything.
+  * [x] Gerbers, one per layer, plus Excellon drill files, via `kicad-cli` with
+    `--excellon-separate-th`.
+  * [x] A single archive of them, which is what an order form accepts.
+  * [x] A **position file (CPL)** in CSV, mm, one per side, which is what
+    assembly needs alongside the BOM.
+  * [x] The **routed** board is plotted when routing ran. Measured: the routed
+    board's copper Gerber holds 25 draw operations (the tracks), the unrouted
+    board's holds none — only pad flashes. Plotting the unrouted board gives a
+    Gerber set that passes every file-level check and yields a board with no
+    connections on it.
+- [x] **VERIFIED** - The output is checked rather than trusted, because each of
+  these fails quietly: `kicad-cli` can exit zero having written nothing, so every
+  file must exist, be non-empty and start with a real Gerber or Excellon header;
+  the layers an order cannot be placed without (copper, outline, solder masks)
+  must be present, and the missing ones are named; and **a part the BOM lists but
+  the position file does not place would be fitted as a hole**, so the designator
+  sets are compared and the difference is reported.
+- [ ] **OPEN** - Only the front side is placed in the position file. Assembly
+  services want one file per side, and the back side is exported when
+  ``position_sides`` asks for it, but no design has yet needed a double-sided
+  assembly run.
 
 ---
 

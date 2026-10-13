@@ -42,7 +42,8 @@ This project builds an AI-powered electronics design platform that transforms na
 5. ✅ ngspice SPICE Simulation - DC op, transient, DC sweep
 6. ✅ PCB Auto-routing - FreeRouting via `pcbnew` DSN/SES; verified 0 unconnected pads
 7. ✅ Bill of Materials (BOM) Generation - real catalog MPNs, descriptions and pricing
-8. ✅ Gerber/Drill Manufacturing Export - verified on generated boards via `kicad-cli`
+8. ✅ Gerber/Drill Manufacturing Export - produced by the pipeline via `kicad-cli`,
+   with a position file (CPL) and an upload-ready archive
 9. ✅ CLI Interface - full pipeline from prompt to KiCad project
 10. ✅ Natural Language Understanding (LLM integration) - Ollama / OpenAI-compatible / Anthropic,
     with schema-constrained output, catalog-grounded part selection, pin and ERC
@@ -117,6 +118,7 @@ This project builds an AI-powered electronics design platform that transforms na
 | Component search (numeric, 179,894 parts) | ✅ Works |
 | Substitute lookup with per-part evidence | ✅ Works |
 | Orderable purchase list + `bom.csv` for JLCPCB | ✅ Works |
+| Gerbers, drill files and a position file (CPL) | ✅ Works |
 | Natural language → specification | ✅ Works (local or cloud LLM) |
 | Specification → validated Circuit IR | ✅ Works |
 | Schematic + PCB + Gerbers | ✅ Works and is KiCad-verified |
@@ -264,6 +266,7 @@ program can use. Two details make the contract work in practice:
 | Emit | Deterministic S-expression writers for schematic and PCB | Files KiCad cannot open or netlist |
 | Net classes | Power and ground nets get a width sized for their current | A 1 A rail routed at 0.2 mm — about 0.74 A of copper |
 | Prompt parsing | The input voltage, current and topology you type are used | A 12 V request silently designed as 5 V |
+| KiCad names | Every symbol and footprint handed to KiCad is checked against the installed libraries | "symbol library not found" on a part the catalogue resolved |
 | Electrical review | Computes dissipation, dropout, voltage stress and the LED operating point | A design that heats itself past its limit, or cannot regulate |
 
 ---
@@ -316,9 +319,10 @@ Three things about how this behaves:
   when stdin is a terminal.
 
 **A clarification must never offer an answer that leads to a broken design.** The
-topology question lists only the topologies that currently pass validation, and
-names the ones that do not, with the reason — the switched-mode controller
-resolves with no pins today.
+topology question lists only the topologies that pass validation, and a test
+builds each one to keep that true. It used to offer just the linear and LED
+options, because ``buck`` and ``boost`` resolved their controller to a generic
+IC with no pins and failed.
 
 ---
 
@@ -929,6 +933,40 @@ ai-electronics-design -p "Design a 5V to 3.3V LDO regulator with an LED" \
   Prices exclude assembly, stencil and shipping.
 ```
 
+### Manufacturing the board
+
+The parts list is half of an order; the board is the other half. Every design now
+ends with the files a board house and an assembly service accept:
+
+```text
+🏭 Step 7b: Generating manufacturing files...
+   ✅ 10 Gerber(s), 2 drill file(s), position file, archived
+   📦 Upload this to a board house: ./my_project/ldo_regulator-gerbers.zip
+```
+
+| File | What it is for |
+|---|---|
+| `<project>-gerbers.zip` | The archive to upload for board fabrication |
+| `gerbers/` | The individual Gerbers and Excellon drill files, one per layer |
+| `<project>-cpl-front.csv` | The position file, which assembly needs alongside the BOM |
+
+The board that gets plotted is the **routed** one when routing ran, and that is
+not a preference. Measured on the reference design: the routed board's copper
+Gerber holds 25 draw operations — the tracks — and the unrouted board's holds
+none, only pad flashes. Plotting the wrong one produces a Gerber set that passes
+every file-level check and yields a board whose pads are not connected to
+anything.
+
+Three things are checked rather than assumed, because each fails quietly:
+
+* `kicad-cli` can exit zero having written nothing, so every file must exist, be
+  non-empty, and actually start with a Gerber or Excellon header;
+* the layers an order cannot be placed without — the copper, the outline and the
+  solder masks — must all be present, or the error says which are missing;
+* **a part the BOM lists but the position file does not place would come back as
+  an unsoldered hole**, so the designator sets are compared and any difference is
+  reported.
+
 **The LCSC column is the whole point.** Before this existed, a generated BOM
 named `CC0805KRX7R9BB106` and quoted an AMS1117 at $0.15. Both look like real
 data and neither is orderable: that part number is not in the JLCPCB catalog, and
@@ -964,6 +1002,24 @@ The list is deliberately honest about what it does *not* know:
 The design itself is not modified. The schematic keeps the symbol and pinout it
 was validated against; the purchase list is a separate, explicit mapping on top
 of it.
+
+### The names handed to KiCad are checked
+
+KiCad ships **no generic IC symbols**: there is no `Regulator_Linear:LDO_Generic`
+and no `MCU_Microcontroller:MCU_Generic`. This project invented 26 names of that
+shape, and 5 of the component templates pointed at names that do not exist
+either. A design that matched one of the 36 templates worked; a design that
+resolved a part from the catalogue failed with `symbol library not found`, because
+the symbol it had been given could not be drawn.
+
+Every name is now a **real KiCad symbol used as an archetype** — the closest
+published part whose symbol suits the category — and a test reads the installed
+libraries to prove it. The pins declared for each archetype are that symbol's own
+pins, verified the same way, so the symbol, the pin numbers and the netlist agree.
+
+Where no archetype's pinout is known — a microcontroller with thirty pins, for
+instance — the part gets no pins and the design reports "no known pinout" rather
+than a plausible wrong one.
 
 ### Where it comes from
 

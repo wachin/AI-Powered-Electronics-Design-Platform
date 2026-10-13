@@ -25,6 +25,29 @@ from src.core.circuit_ir import (
 )
 from src.core.erc import ERCValidator, ERCReport
 from src.core.design_review import review_circuit
+from src.generators.fabrication import export_fabrication
+
+
+def board_to_manufacture(
+    routing_result: Optional[Any], generated_files: Dict[str, Path]
+) -> Optional[Path]:
+    """
+    Which board to plot.
+
+    The **routed** board, whenever routing succeeded. This is not a preference:
+    measured on the reference design, the routed board's copper Gerber contains
+    25 draw operations — the tracks — and the unrouted board's contains none. The
+    unrouted board plots its pads and nothing else, which is a Gerber set that
+    looks complete, passes every file-level check, and produces a board with no
+    connections on it.
+    """
+    if (
+        routing_result is not None
+        and getattr(routing_result, "success", False)
+        and getattr(routing_result, "routed_pcb_path", None)
+    ):
+        return Path(routing_result.routed_pcb_path)
+    return generated_files.get("pcb")
 from src.generators.kicad_generator import KiCadGenerator
 from src.components.database import ComponentDatabase, ComponentSpec
 from src.components.ordering import build_purchase_list
@@ -73,6 +96,8 @@ class DesignSummary:
     # The computed electrical review: dissipation, dropout, voltage stress, LED
     # operating point. Replaces the generic "check thermal dissipation" notes.
     design_review: Optional[Any] = None
+    # Gerbers, drill files and the position file, if they were produced.
+    fabrication: Optional[Any] = None
     # What the requirement parser read from the prompt, and — in `assumptions` —
     # what it filled in instead. A guessed input voltage decides whether the
     # finished design works, so it is reported rather than buried.
@@ -94,6 +119,7 @@ class DesignSummary:
             "bom": self.bom,
             "design_review": self.design_review.to_dict() if self.design_review else None,
             "requirements": self.requirements,
+            "fabrication": self.fabrication.to_dict() if self.fabrication else None,
             "total_cost": round(
                 sum(item.get("total_price", 0.0) or 0.0 for item in self.bom), 4
             ),
@@ -325,6 +351,35 @@ class AIDesignOrchestrator:
         except Exception as e:
             print(f"   ⚠️  3D export failed: {e}")
 
+        # Step 7b: manufacturing output. A KiCad project is not something a board
+        # house accepts: this is where the design becomes orderable as a board and
+        # as an assembled panel.
+        print("\n🏭 Step 7b: Generating manufacturing files...")
+        board_for_manufacture = board_to_manufacture(routing_result, generated_files)
+        fabrication = export_fabrication(
+            board_for_manufacture,
+            output_dir,
+            request.project_name,
+            expected_designators=[item for line in bom for item in line["designators"]],
+        )
+        if fabrication.gerber_files:
+            generated_files["gerbers"] = fabrication.gerber_files[0].parent
+        if fabrication.archive:
+            generated_files["gerber_archive"] = fabrication.archive
+        if fabrication.position_file:
+            generated_files["position_file"] = fabrication.position_file
+
+        if fabrication.usable:
+            print(f"   ✅ {fabrication.summary()}")
+            if fabrication.archive:
+                print(f"   📦 Upload this to a board house: {fabrication.archive}")
+        else:
+            print("   ❌ Manufacturing files incomplete:")
+        for problem in fabrication.errors:
+            print(f"   ❌ {problem}")
+        for warning in fabrication.warnings:
+            print(f"   ⚠️  {warning}")
+
         # Step 8: optional independent check via an MCP server.
         mcp_validation = None
         if getattr(request, "mcp_validate", False):
@@ -348,6 +403,7 @@ class AIDesignOrchestrator:
             purchase_list=purchase_list,
             design_review=design_review,
             requirements=parsed_requirements,
+            fabrication=fabrication,
             used_llm=getattr(specification, "used_llm", True),
             topology=getattr(specification, "topology", "") or "",
             design_notes=list(getattr(specification, "warnings", []) or []),

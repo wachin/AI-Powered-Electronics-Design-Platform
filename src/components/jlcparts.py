@@ -443,7 +443,27 @@ class JLCPart:
         return ""
 
     def _category_to_symbol(self, category: str) -> str:
-        """Map category to KiCad symbol library path."""
+        """
+        The KiCad symbol to use for a catalogue part of this category.
+
+        Every name here was checked against the installed KiCad symbol libraries,
+        and a test enforces that. That matters because KiCad ships **no generic
+        IC symbols**: there is no ``Regulator_Linear:LDO_Generic`` and no
+        ``MCU_Microcontroller:MCU_Generic``. An earlier version of this table
+        invented 26 such names, which meant a design that resolved a part from the
+        catalogue could not be drawn at all — ``symbol library not found`` — where
+        a design that matched one of the 36 templates worked.
+
+        Each entry is therefore a *real* symbol used as an archetype: the closest
+        published part whose symbol suits the category. The pins declared for it
+        in :mod:`src.core.component_resolver` are that symbol's own pins, so the
+        schematic, the pin numbers and the netlist agree with one another.
+
+        Where no archetype's pins are known, the part gets no pins and the design
+        reports "no known pinout" rather than a plausible wrong one.
+        """
+        # Real symbols, used because KiCad has no generic IC symbol. See the
+        # docstring: these are archetypes, not claims about a specific part.
         symbol_map = {
             "resistor": "Device:R",
             "capacitor": "Device:C",
@@ -452,52 +472,55 @@ class JLCPart:
             "led": "Device:LED",
             "zener": "Device:D_Zener",
             "schottky": "Device:D_Schottky",
-            "transistor": "Device:Q_NPN_BEC",
-            "mosfet": "Device:MOSFET_N",
-            "jfet": "Device:JFET_N",
-            "regulator_ldo": "Regulator_Linear:LDO_Generic",
-            "regulator_buck": "Regulator_Switching:Buck_Controller",
-            "regulator_boost": "Regulator_Switching:Boost_Controller",
-            "microcontroller": "MCU_Microcontroller:MCU_Generic",
-            "opamp": "Amplifier_Operational:Opamp",
-            "comparator": "Amplifier_Comparator:Comparator",
-            "voltage_reference": "Voltage_Reference:VREF",
-            "crystal": "Crystal:Crystal",
-            "oscillator": "Crystal:Oscillator",
-            "connector": "Connector:Conn_Generic",
+            "transistor": "Transistor_BJT:Q_NPN_BEC",
+            "mosfet": "Transistor_FET:Q_NMOS_GSD",
+            "regulator_ldo": "Regulator_Linear:LD1117S33TR_SOT223",
+            "regulator_buck": "Regulator_Switching:LM2596S-5",
+            "regulator_boost": "Regulator_Switching:MT3608",
+            "regulator_switching": "Regulator_Controller:LM3478MA",
+            "power_management": "Regulator_Linear:LD1117S33TR_SOT223",
+            "voltage_reference": "Reference_Voltage:TL431DBZ",
+            "supervisor": "Power_Supervisor:LM810",
+            "battery_management": "Battery_Management:MCP73831-2-OT",
+            "power_switch": "Power_Management:AAT4610BIGV-T1",
+            "microcontroller": "MCU_ST_STM32F1:STM32F103C8Tx",
+            "opamp": "Amplifier_Operational:LM358",
+            "comparator": "Comparator:LM393",
+            "crystal": "Device:Crystal",
+            "oscillator": "Device:Crystal",
+            "connector": "Connector_Generic:Conn_01x02",
             "switch": "Switch:SW_Push",
             "fuse": "Device:Fuse",
-            "tvs": "Power_Protection:TVS",
+            "tvs": "Diode:1.5KExxA",
             "varistor": "Device:Varistor",
-            "thermistor": "Device:Thermistor",
-            "sensor": "Sensor:Generic",
-            "rf_module": "RF_Module:Module_Generic",
-            "memory": "Memory:EEPROM",
-            "logic": "Logic_Gate:AND",
-            "driver": "Driver:Gate_Driver",
-            "isolation": "Isolation:Optocoupler",
-            "power_management": "Regulator_Linear:LDO_Generic",
-            "regulator_switching": "Regulator_Switching:Buck_Controller",
-            "voltage_reference": "Reference_Voltage:VREF",
-            "supervisor": "Power_Supervisor:Supervisor",
-            "battery_management": "Battery_Management:Charger",
-            "power_switch": "Power_Protection:Load_Switch",
-            "analog": "Analog:Generic",
-            "interface": "Interface:Generic",
-            "data_acquisition": "Analog_ADC:ADC_Generic",
-            "display": "Display_Character:Display_Generic",
-            "filter": "Filter:Filter_Generic",
-            "power_module": "Converter_DCDC:Module_Generic",
-            "relay": "Relay:Relay_Generic",
+            "circuit_protection": "Device:Fuse",
+            "sensor": "Sensor_Temperature:LM35-D",
+            "rf_module": "RF_Module:ESP32-WROOM-32",
+            "memory": "Memory_EEPROM:24LC256",
+            "logic": "74xx:74HC00",
+            "driver": "Driver_Motor:L293D",
+            "isolation": "Isolator:PC817",
+            "interface": "Interface_UART:MAX232",
+            "data_acquisition": "Analog_ADC:MCP3008",
+            "display": "Display_Graphic:AG12864E",
+            "filter": "Filter:FN405-1-02",
+            "relay": "Relay:EC2-3NU",
             "audio": "Device:Speaker",
             "hardware": "Mechanical:MountingHole",
-            "module": "Module:Module_Generic",
+            "module": "RF_Module:ESP32-WROOM-32",
+            "power_module": "Converter_DCDC:IH0505S",
+            "analog": "Analog:AD630ARZ",
         }
         cat_lower = category.lower().strip()
-        for key, val in symbol_map.items():
+        # Longest key first, so "power_module" is not matched by "module" and
+        # "rf_module" is not matched by "module" either.
+        for key in sorted(symbol_map, key=len, reverse=True):
             if key in cat_lower:
-                return val
-        return "Device:R"  # Default fallback
+                return symbol_map[key]
+        # Nothing recognised. "Device:R" used to be the fallback, which drew a
+        # resistor for an unknown part; an empty symbol is honest and lets the
+        # design report that it has nothing to draw.
+        return ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {

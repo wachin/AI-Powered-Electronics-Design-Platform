@@ -46,19 +46,21 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 # only to decide whether to ask.
 THERMAL_ATTENTION_W = 1.0
 
-# The topologies this platform can generate a design for, and whether they
-# currently produce something that passes the electrical rules. A question must
-# not offer an answer that leads to a broken design.
+# The topologies this platform can generate a design for, checked by
+# `tests/test_topologies.py`, which builds each one and requires it to pass the
+# electrical rules. A clarification must never offer an answer that leads to a
+# broken design, so this list is not a wish list.
 WORKING_TOPOLOGIES: Dict[str, str] = {
     "ldo_regulator": "linear regulator (LDO)",
+    "buck_converter": "switching step-down (buck)",
+    "boost_converter": "switching step-up (boost)",
     "led_driver": "LED with a series resistor",
 }
 
-# Understood by the pipeline but not offered, with the reason.
-UNUSABLE_TOPOLOGIES: Dict[str, str] = {
-    "buck_converter": "the switched-mode controller resolves with no pins, so the design fails validation",
-    "boost_converter": "the switched-mode controller resolves with no pins, so the design fails validation",
-}
+# Understood by the pipeline but deliberately not offered, with the reason.
+# Empty today; the structure stays because a topology that stops working has to
+# be withdrawn from the question rather than silently offered.
+UNUSABLE_TOPOLOGIES: Dict[str, str] = {}
 
 
 @dataclass

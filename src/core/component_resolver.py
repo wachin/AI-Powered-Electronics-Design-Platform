@@ -365,6 +365,77 @@ _IC_PINOUTS: Dict[str, Tuple[Tuple[str, str, PinType], ...]] = {
         ("4", "FB", PinType.INPUT),
         ("5", "ON", PinType.INPUT),
     ),
+    # Regulator_Linear:LD1117S33TR_SOT223 -> 1=GND, 2=VO, 3=VI, the same pinout
+    # as the AMS1117 and the other fixed SOT-223 linear regulators.
+    "ld1117": _named_pins(
+        ("1", "GND", PinType.POWER_IN),
+        ("2", "VO", PinType.POWER_OUT),
+        ("3", "VI", PinType.POWER_IN),
+    ),
+    # Comparator:LM393 / Amplifier_Operational:LM358 -> the dual op-amp pinout.
+    # Every pin number and name below was read from the installed KiCad symbol.
+    "lm393": _named_pins(
+        ("1", "~", PinType.OUTPUT),
+        ("2", "-", PinType.INPUT),
+        ("3", "+", PinType.INPUT),
+        ("4", "V-", PinType.POWER_IN),
+        ("5", "+", PinType.INPUT),
+        ("6", "-", PinType.INPUT),
+        ("7", "~", PinType.OUTPUT),
+        ("8", "V+", PinType.POWER_IN),
+    ),
+    # Power_Supervisor:LM810 -> 1=GND, 2=RESET, 3=VCC
+    "lm810": _named_pins(
+        ("1", "GND", PinType.POWER_IN),
+        ("2", "RESET", PinType.OUTPUT),
+        ("3", "VCC", PinType.POWER_IN),
+    ),
+    # Power_Management:AAT4610BIGV-T1 (load switch) -> 1=OUT, 2=GND, 3=SET, 4=ON, 5=IN
+    "aat4610": _named_pins(
+        ("1", "OUT", PinType.POWER_OUT),
+        ("2", "GND", PinType.POWER_IN),
+        ("3", "SET", PinType.INPUT),
+        ("4", "ON", PinType.INPUT),
+        ("5", "IN", PinType.POWER_IN),
+    ),
+    # Battery_Management:MCP73831-2-OT -> 1=STAT, 2=VSS, 3=VBAT, 4=VDD, 5=PROG
+    "mcp73831": _named_pins(
+        ("1", "STAT", PinType.OUTPUT),
+        ("2", "VSS", PinType.POWER_IN),
+        ("3", "VBAT", PinType.POWER_OUT),
+        ("4", "VDD", PinType.POWER_IN),
+        ("5", "PROG", PinType.INPUT),
+    ),
+    # Isolator:PC817 -> 1=anode, 2=cathode, 3=emitter, 4=collector
+    "pc817": _named_pins(
+        ("1", "A", PinType.INPUT),
+        ("2", "K", PinType.POWER_IN),
+        ("3", "E", PinType.OUTPUT),
+        ("4", "C", PinType.OUTPUT),
+    ),
+    # Memory_EEPROM:24LC256 -> 1=A0, 2=A1, 3=A2, 4=GND, 5=SDA, 6=SCL, 7=WP, 8=VCC
+    "24lc256": _named_pins(
+        ("1", "A0", PinType.INPUT),
+        ("2", "A1", PinType.INPUT),
+        ("3", "A2", PinType.INPUT),
+        ("4", "GND", PinType.POWER_IN),
+        ("5", "SDA", PinType.BIDIRECTIONAL),
+        ("6", "SCL", PinType.INPUT),
+        ("7", "WP", PinType.INPUT),
+        ("8", "VCC", PinType.POWER_IN),
+    ),
+    # Regulator_Controller:LM3478MA -> 1=ISEN, 2=COMP, 3=FB, 4=AGND, 5=PGND,
+    # 6=DR, 7=FA/SD, 8=VIN
+    "lm3478": _named_pins(
+        ("1", "ISEN", PinType.INPUT),
+        ("2", "COMP", PinType.PASSIVE),
+        ("3", "FB", PinType.INPUT),
+        ("4", "AGND", PinType.POWER_IN),
+        ("5", "PGND", PinType.POWER_IN),
+        ("6", "DR", PinType.OUTPUT),
+        ("7", "FA", PinType.INPUT),
+        ("8", "VIN", PinType.POWER_IN),
+    ),
     # Regulator_Switching:MT3608 -> 1=SW, 2=GND, 3=FB, 4=EN, 5=VIN, 6=NC
     "mt3608": _named_pins(
         ("1", "SW", PinType.POWER_OUT),

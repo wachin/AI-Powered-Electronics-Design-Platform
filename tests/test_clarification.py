@@ -186,11 +186,20 @@ class TestAnswering:
         assert req.input_voltage == 12.0
         assert req.output_voltage == 5.0
 
-    def test_an_unusable_topology_answer_is_ignored(self):
-        """The question does not offer it, so an answer naming it must not stick."""
+    def test_a_topology_the_question_did_not_offer_is_ignored(self):
+        """
+        Only the answers the question offered are accepted, so a stray or
+        withdrawn topology cannot end up in the design.
+        """
         req = requirement(circuit_type="generic")
-        apply_answers(req, {"circuit_type": "buck_converter"})
+        apply_answers(req, {"circuit_type": "phono_preamp"})
         assert req.circuit_type == "generic"
+
+    def test_every_offered_topology_is_accepted(self):
+        for topology in WORKING_TOPOLOGIES:
+            req = requirement(circuit_type="generic")
+            apply_answers(req, {"circuit_type": topology})
+            assert req.circuit_type == topology
 
     def test_a_stray_key_is_ignored(self):
         req = requirement()

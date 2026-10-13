@@ -503,7 +503,7 @@ class CircuitSpecificationGenerator:
         "buck_converter": {
             "topology": "Asynchronous Buck Converter",
             "components": [
-                {"role": "controller", "mpn": "", "lcsc": "", "value": "5V", "package": "TO-220-5", "reasoning": "Buck converter controller"},
+                {"role": "buck_controller", "mpn": "", "lcsc": "", "value": "5V", "package": "TO-220-5", "reasoning": "Buck converter controller"},
                 {"role": "inductor", "mpn": "", "lcsc": "", "value": "47uH", "package": "12x12mm", "reasoning": "Buck inductor"},
                 {"role": "input_capacitor", "mpn": "", "lcsc": "", "value": "10uF", "package": "0805", "reasoning": "Input decoupling"},
                 {"role": "output_capacitor", "mpn": "", "lcsc": "", "value": "100uF", "package": "1206", "reasoning": "Output filtering"},
@@ -1201,7 +1201,7 @@ class CircuitSpecificationGenerator:
             "topology": "buck_async",
             "components": [
                 {
-                    "role": "controller",
+                    "role": "buck_controller",
                     "mpn": "",
                     "value": "5V",
                     "package": "TO-220-5",
@@ -1258,7 +1258,7 @@ class CircuitSpecificationGenerator:
             "topology": "boost",
             "components": [
                 {
-                    "role": "controller",
+                    "role": "boost_controller",
                     "mpn": "",
                     "value": "Adjustable",
                     "package": "SOT-23-6",
