@@ -105,10 +105,15 @@ class MCPServerManager:
             requirements = list(spec.install)
         elif spec.source_dir is not None:
             if not spec.source_dir.exists():
+                # `external/` was removed and must not come back (AGENTS.md):
+                # installable code is declared in pyproject.toml, never cloned
+                # into the tree. This branch only runs for a server that has no
+                # published package, and the message has to say so instead of
+                # pointing at a submodule that no longer exists.
                 result.error = (
-                    f"source not found: {spec.source_dir}. "
-                    "Initialise submodules: git submodule update --init external/"
-                    f"{spec.key if spec.key != 'pcbparts' else 'pcbparts-mcp'}"
+                    f"source not found: {spec.source_dir}. This server has no "
+                    "published package; declare it in pyproject.toml (PyPI or a "
+                    "git+https:// URL) instead of vendoring a checkout."
                 )
                 return result
             requirements = [str(spec.source_dir.parent)]
