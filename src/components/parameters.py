@@ -312,7 +312,6 @@ def parse_temperature_range(text: Any) -> Optional[TemperatureRange]:
         return None
 
     lower_part, _, upper_part = raw.partition("~")
-    lowered = lower_part.lstrip("+-")
     # A leading minus belongs to the lower bound; without one the range starts at
     # zero or above, which is how "0℃~+150℃" is written.
     if "-" not in lower_part and "−" not in lower_part:

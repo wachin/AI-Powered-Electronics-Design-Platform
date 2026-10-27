@@ -10,16 +10,14 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Any, Union
 from pathlib import Path
 from src.llm.providers import (
-    LLMProvider,
     create_llm_client,
     LLMClient,
     LLMProvider,
     LLMMessage,
-    MockLLMClient,
     LLMResponseError,
 )
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType, PowerDomain
-from src.core.circuit_builder import CircuitIRBuilder, BuildReport
+from src.core.circuit_ir import CircuitIR
+from src.core.circuit_builder import CircuitIRBuilder
 from src.llm.validation import DesignValidator, DesignValidationReport
 from src.components.database import ComponentDatabase
 from src.llm.clarification import (
@@ -1080,15 +1078,6 @@ class CircuitSpecificationGenerator:
 
     def _generate_spec(self, req: CircuitRequirement) -> Dict[str, Any]:
         """Rule-based specification generation."""
-        spec = {
-            "topology": "",
-            "components": [],
-            "connections": [],
-            "power_domains": {},
-            "design_notes": [],
-            "warnings": [],
-        }
-
         if req.circuit_type == "ldo_regulator":
             return self._spec_ldo(req)
         elif req.circuit_type == "buck_converter":

@@ -18,11 +18,10 @@ FreeRouting is not bundled with any Python package; the jar is looked up in
 """
 
 import subprocess
-import tempfile
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -98,7 +97,6 @@ class FreeRoutingRunner:
         out_dir.mkdir(parents=True, exist_ok=True)
 
         dsn_path = out_dir / f"{pcb_path.stem}.dsn"
-        ses_path = out_dir / f"{pcb_path.stem}.ses"
         routed_ses_path = out_dir / f"{pcb_path.stem}_routed.ses"
         routed_pcb_path = out_dir / f"{pcb_path.stem}_routed.kicad_pcb"
 

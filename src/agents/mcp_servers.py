@@ -12,7 +12,6 @@ action (``ai-electronics-design mcp-setup``) rather than a side effect.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass

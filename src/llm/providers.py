@@ -277,15 +277,6 @@ class OpenAIClient(LLMClient):
             )
         return self._client
 
-    async def health_check(self) -> bool:
-        try:
-            client = await self._get_client()
-            response = await client.get("/models", timeout=10.0)
-            return response.status_code == 200
-        except Exception as e:
-            logger.warning(f"OpenAI health check failed: {e}")
-            return False
-
     async def complete(
         self,
         messages: List[LLMMessage],
@@ -384,10 +375,6 @@ class AnthropicClient(LLMClient):
                 base_url=self.base_url,
             )
         return self._client
-
-    async def health_check(self) -> bool:
-        # Anthropic doesn't have a simple health endpoint
-        return True
 
     async def complete(
         self,
@@ -562,9 +549,6 @@ class MockLLMClient(LLMClient):
             "output_voltage": 3.3,
             "output_current": 0.5,
         })
-
-    async def health_check(self) -> bool:
-        return True
 
 
 def create_llm_client(

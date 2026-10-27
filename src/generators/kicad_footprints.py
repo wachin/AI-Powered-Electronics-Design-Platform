@@ -268,7 +268,6 @@ def _render_sexpr(node, parent: str = "", indent: int = 0) -> str:
     KiCad is strict about quoting: pad numbers, net names and layer names must
     be strings. Structural keywords and plain numbers stay bare.
     """
-    pad = "  " * indent
     if isinstance(node, str):
         if node == "":
             return '""'

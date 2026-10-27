@@ -12,11 +12,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
 import asyncio
-import json
 import threading
 from datetime import datetime
 
-from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest, DesignSummary
+from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest
 from src.components.database import ComponentDatabase
 from src.collaboration.server import router as collaboration_router, handle_collaboration_websocket
 

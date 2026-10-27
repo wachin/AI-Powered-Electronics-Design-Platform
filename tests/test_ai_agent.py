@@ -5,7 +5,7 @@ Tests for AI Design Agent with MCP Integration.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.agents.ai_agent import (
-    AIDesignAgent, AgentGoal, AgentState, PlanStep, ExecutionResult, AgentExecution
+    AIDesignAgent, AgentGoal, AgentState, PlanStep
 )
 from src.agents.mcp_client import MCPResult
 from src.agents.orchestrator import DesignSummary, ERCReport

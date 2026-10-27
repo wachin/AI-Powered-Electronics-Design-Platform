@@ -11,8 +11,7 @@ from src.security.permissions import (
     PERMISSIONS_BY_ROLE, TemporaryPermission
 )
 from src.security.sandbox import (
-    Sandbox, SandboxConfig, ResourceLimits,
-    ExecutionResult, RestrictedFileSystem, SecureExecutor
+    Sandbox, SandboxConfig, RestrictedFileSystem, SecureExecutor
 )
 
 
@@ -117,7 +116,8 @@ class TestPermissions:
     
     def test_temporary_permission(self):
         manager = PermissionManager()
-        principal = manager.create_principal("user_1", "user", "Test")
+        # The call registers the principal; it is the side effect that matters.
+        manager.create_principal("user_1", "user", "Test")
         
         assert not manager.check_permission("user_1", Permission.ADMIN_SYSTEM)
         
@@ -216,9 +216,14 @@ class TestSandbox:
             sandbox.write_file(Path("test.txt"), "test")
             sandbox_path = sandbox._temp_dir
         
-        # After context exit, temp dir should be cleaned up
+        # After context exit, temp dir should be cleaned up — and no new sandbox
+        # directory should be left behind. The "before" set was collected for this
+        # comparison and then never used, so the test passed even if the sandbox
+        # leaked a directory.
         await asyncio.sleep(0.1)  # Give time for cleanup
         assert not sandbox_path.exists()
+        leaked = set(Path("/tmp").glob("sandbox_*")) - temp_dirs_before
+        assert leaked == set(), f"sandbox directories left behind: {leaked}"
 
 
 class TestRestrictedFileSystem:
@@ -243,9 +248,8 @@ class TestSecureExecutor:
         from src.security.permissions import PermissionManager
         
         perm_manager = PermissionManager()
-        principal = perm_manager.create_principal("user_1", "user", "Test")
+        perm_manager.create_principal("user_1", "user", "Test")
         
-        config = SandboxConfig()
         async with SecureExecutor(perm_manager, SandboxConfig()) as executor:
             executor.set_mcp_client(MagicMock())
             executor.permissions.grant_permission("user_1", Permission.EXECUTE_MCP_TOOL)

@@ -20,12 +20,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from src.core.circuit_ir import (
     CircuitIR,
     Component,
     ComponentType,
-    PinType,
     PowerDomain,
 )
 from src.core.component_resolver import (
@@ -34,7 +33,6 @@ from src.core.component_resolver import (
     find_pin_in,
     infer_component_type,
     is_power_net,
-    normalize_package,
     resolve_mpn,
     resolve_pins,
     role_to_component_type,

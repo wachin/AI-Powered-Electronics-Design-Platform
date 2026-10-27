@@ -11,10 +11,10 @@ Implements intelligent component placement with:
 
 import math
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Set
 from enum import Enum
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, Net
+from src.core.circuit_ir import CircuitIR, Component, ComponentType
 
 
 class PlacementStrategy(Enum):
@@ -675,10 +675,7 @@ def generate_pcb_with_smart_placement(
     """
     placed = smart_place_components(circuit, board_width, board_height, strategy)
     
-    import json
-    import uuid
     
-    pcb_uuid = str(uuid.uuid4())
     footprints_sexpr = []
     
     for ref, placed in placed.items():

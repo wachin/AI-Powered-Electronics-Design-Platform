@@ -13,7 +13,6 @@ KiCad footprint libraries, and to have every connected pad assigned to its net.
 import re
 import subprocess
 
-import pytest
 
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
 from src.generators.kicad_footprints import load_footprint, place_pads

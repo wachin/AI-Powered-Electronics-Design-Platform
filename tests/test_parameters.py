@@ -9,7 +9,6 @@ discovered after the boards arrive.
 import pytest
 
 from src.components.parameters import (
-    ParsedValue,
     category_from_parameters,
     extract_parameters,
     format_value,

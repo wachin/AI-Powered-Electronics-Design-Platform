@@ -11,7 +11,6 @@ It was not a loud failure; it was a confident answer to a question nobody asked.
 import pytest
 
 from src.llm.integration import (
-    NLToCircuitPipeline,
     RequirementParser,
     create_nl_pipeline,
 )

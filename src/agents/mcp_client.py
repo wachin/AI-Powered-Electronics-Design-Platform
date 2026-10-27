@@ -7,7 +7,7 @@ Provides async client for communicating with KiCad MCP server via stdio transpor
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Callable
 from contextlib import asynccontextmanager
 import shlex
@@ -438,11 +438,6 @@ class KiCadMCPTools:
     
     async def run_drc(self, project_path: str) -> MCPResult:
         return await self.client.call_tool("run_drc", {
-            "project_path": project_path
-        })
-    
-    async def detect_pin_conflicts(self, project_path: str) -> MCPResult:
-        return await self.client.call_tool("detect_pin_conflicts", {
             "project_path": project_path
         })
     

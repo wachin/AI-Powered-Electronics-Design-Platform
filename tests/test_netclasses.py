@@ -8,17 +8,15 @@ like it set a width, which is what made it hard to notice.
 """
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, Net, Point2D
+from src.core.circuit_ir import CircuitIR, Component, ComponentType, Net
 from src.generators.kicad_generator import KiCadGenerator
 from src.pcb.netclasses import (
     DEFAULT_CLASS,
-    HIGH_POWER_CLASS,
     HIGH_POWER_THRESHOLD_A,
     MIN_TRACE_WIDTH_MM,
     POWER_CLASS,

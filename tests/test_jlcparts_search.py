@@ -444,7 +444,6 @@ class TestCategoryTaxonomy:
 
     def test_refined_categories_are_reachable_by_search(self, catalog_path, monkeypatch):
         """Every category in the list the API serves must actually return parts."""
-        import sqlite3 as _sqlite3
 
         from src.components.database import ComponentDatabase
 

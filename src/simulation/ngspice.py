@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
+from src.core.circuit_ir import CircuitIR, Component, ComponentType
 
 
 @dataclass
@@ -134,7 +134,7 @@ class CircuitIRToSpice:
         """Generates a SPICE netlist from Circuit IR."""
         lines = [
             f"* {self.circuit.name}",
-            f"* Auto-generated from Circuit IR",
+            "* Auto-generated from Circuit IR",
             "",
         ]
 

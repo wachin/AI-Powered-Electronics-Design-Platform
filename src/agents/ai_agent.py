@@ -6,23 +6,16 @@ electronics design automation with planning and verification loops.
 """
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
-import os
 
 from src.agents.mcp_client import MCPClient, KiCadMCPTools, create_mcp_client, MCPResult
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType, PowerDomain
-from src.core.erc import ERCValidator, ERCReport
-from src.generators.kicad_generator import KiCadGenerator
-from src.simulation.ngspice import simulate_circuit, SimulationResult
-from src.routing.freerouting import route_kicad_pcb, RoutingResult
 from src.components.database import ComponentDatabase
-from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest, DesignSummary
+from src.agents.orchestrator import AIDesignOrchestrator, DesignRequest
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +119,6 @@ class AIDesignAgent:
         return execution
 
     async def _generate_plan(self, goal: AgentGoal) -> List[PlanStep]:
-        goal_lower = goal.description.lower()
         plan = []
         step_id = 1
 
@@ -179,7 +171,6 @@ class AIDesignAgent:
         step_id = start_id
         steps = []
 
-        v_in = goal.constraints.get("input_voltage", 5.0)
         v_out = goal.constraints.get("output_voltage", 3.3)
         i_out = goal.constraints.get("current", 0.5)
 

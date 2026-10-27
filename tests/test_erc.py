@@ -3,7 +3,7 @@ Unit tests for Electrical Rule Checker (ERC).
 """
 
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
-from src.core.erc import ERCValidator, Severity
+from src.core.erc import ERCValidator
 
 
 def test_erc_clean_circuit():

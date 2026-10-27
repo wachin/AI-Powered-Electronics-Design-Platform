@@ -5,8 +5,8 @@ This layer acts as the single source of truth for all electronic designs.
 It maps between natural language specifications, Circuit JSON, and KiCad models.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional, Union
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional
 from enum import Enum
 import uuid
 

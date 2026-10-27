@@ -43,7 +43,7 @@ and leaves the router to fail loudly if that is impossible.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 # ---------------------------------------------------------------------------

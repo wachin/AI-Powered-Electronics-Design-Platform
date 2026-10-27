@@ -12,12 +12,11 @@ kicad-cli is available — verify with KiCad itself that the netlist is non-empt
 
 import subprocess
 
-import pytest
 
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
 from src.generators.kicad_generator import KiCadGenerator
 from conftest import requires_kicad
-from src.generators.kicad_symbols import SymbolLibrary, load_symbol
+from src.generators.kicad_symbols import load_symbol
 
 R = "Device:R"
 C = "Device:C"

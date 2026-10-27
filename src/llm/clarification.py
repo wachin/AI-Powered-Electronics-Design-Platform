@@ -38,7 +38,7 @@ and say so, which is what the assumptions list is for.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 # A linear regulator shedding more than this in a surface-mount package needs a
 # deliberate thermal decision. It is a rule of thumb, stated as one: the exact

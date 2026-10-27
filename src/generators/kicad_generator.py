@@ -17,7 +17,7 @@ from src.pcb.netclasses import (
     describe_netclasses,
     netclass_assignments,
 )
-from src.core.circuit_ir import CircuitIR, Component, Net, ComponentType
+from src.core.circuit_ir import CircuitIR
 from src.generators.kicad_symbols import get_symbol_library
 from src.generators.kicad_footprints import (
     get_footprint_library,

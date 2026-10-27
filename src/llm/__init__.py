@@ -21,7 +21,6 @@ from src.llm.integration import (
     CircuitSpecificationGenerator,
     NLToCircuitPipeline,
     create_nl_pipeline,
-    MockLLMClient,
 )
 
 __all__ = [

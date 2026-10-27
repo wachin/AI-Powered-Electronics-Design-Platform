@@ -4,16 +4,14 @@ Yjs Collaboration Server for AI-Powered Electronics Design Platform.
 WebSocket server for real-time collaborative editing using Yjs CRDT.
 """
 
-import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Set, Optional, Any, List
+from typing import Dict, Optional, Any, List
 from datetime import datetime
 import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ Security and Permission System for AI-Powered Electronics Design Platform.
 Implements capability-based permission system for AI agents and users.
 """
 
-from enum import Enum, auto
+from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional, Any
 from datetime import datetime

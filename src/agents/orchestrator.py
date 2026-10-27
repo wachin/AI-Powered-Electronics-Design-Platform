@@ -11,7 +11,6 @@ Pipeline:
 7. PCB auto-routing (FreeRouting)
 """
 
-import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable, List, Dict, Any, Optional
@@ -58,7 +57,7 @@ from src.pcb.netclasses import (
 )
 from src.simulation.ngspice import simulate_circuit, SimulationResult
 from src.routing.freerouting import route_kicad_pcb, RoutingResult
-from src.llm.integration import NLToCircuitPipeline, create_nl_pipeline
+from src.llm.integration import NLToCircuitPipeline
 from src.llm.providers import create_llm_client
 
 
@@ -275,7 +274,7 @@ class AIDesignOrchestrator:
         print("\n🔧 Step 4: Generating KiCad project files...")
         generator = KiCadGenerator(circuit_ir)
         generated_files = generator.export_project(output_dir, request.project_name)
-        print(f"   ✅ Generated: SCH, PCB, PRO")
+        print("   ✅ Generated: SCH, PCB, PRO")
 
         # Step 5: PCB Auto-routing with FreeRouting (if requested)
         routing_result = None
@@ -284,7 +283,7 @@ class AIDesignOrchestrator:
             pcb_path = generated_files["pcb"]
             routing_result = route_kicad_pcb(pcb_path)
             if routing_result.success:
-                print(f"   ✅ PCB auto-routing completed")
+                print("   ✅ PCB auto-routing completed")
                 # Add routed PCB to generated files
                 if routing_result.routed_ses_path and routing_result.routed_ses_path.exists():
                     generated_files["pcb_routed"] = routing_result.routed_ses_path

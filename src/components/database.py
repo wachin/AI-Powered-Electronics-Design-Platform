@@ -11,7 +11,7 @@ Priority:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from src.components.jlcparts import JLCPartsDatabase, JLCPart, download_catalog

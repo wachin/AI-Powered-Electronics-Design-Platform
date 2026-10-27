@@ -12,6 +12,9 @@ rather than failing.
 import json
 import sqlite3
 import logging
+import struct
+import zipfile
+import zlib
 from pathlib import Path
 import os
 from dataclasses import dataclass, field, replace as _dataclass_replace
@@ -544,7 +547,6 @@ class JLCPart:
             "symbol": self.symbol,
             "parameters": {k: v for k, v in self.parameters.items() if k != "raw"},
             "specification": self.specification_summary(),
-            "min_order": self.min_order,
             "attrition": self.attrition,
         }
 
@@ -596,6 +598,18 @@ class Substitute:
         lines += [f"  + {reason}" for reason in self.reasons]
         lines += [f"  ! {caveat}" for caveat in self.caveats]
         return "\n".join(lines)
+
+
+def _escape_like(term: str) -> str:
+    """
+    Escape the LIKE wildcards in a user-supplied term.
+
+    A function rather than an inline expression because the escape sequence is a
+    backslash, and a backslash inside an f-string is a syntax error before Python
+    3.12. Inline, that single line made this module unimportable on the 3.10 the
+    project claims to support.
+    """
+    return term.replace("%", "\\%").replace("_", "\\_")
 
 
 class JLCPartsDatabase:
@@ -1202,7 +1216,10 @@ class JLCPartsDatabase:
         params: List[Any] = []
 
         for term in parsed.text_terms:
-            like = f"%{term.replace('%', '\\%').replace('_', '\\_')}%"
+            # Escaped outside the f-string: a backslash inside one is a syntax
+            # error before Python 3.12, and this project supports 3.10.
+            escaped = _escape_like(term)
+            like = f"%{escaped}%"
             conditions.append(
                 "(description LIKE ? ESCAPE '\\' COLLATE NOCASE "
                 "OR mfr LIKE ? ESCAPE '\\' COLLATE NOCASE)"

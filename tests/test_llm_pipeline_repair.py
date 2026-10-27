@@ -22,7 +22,7 @@ from src.llm.integration import (
     CircuitSpecificationGenerator,
     NLToCircuitPipeline,
 )
-from src.llm.providers import LLMClient, LLMMessage, LLMResponse, LLMResponseError
+from src.llm.providers import LLMClient, LLMResponse, LLMResponseError
 
 
 class ScriptedLLMClient(LLMClient):

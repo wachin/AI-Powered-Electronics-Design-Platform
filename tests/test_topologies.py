@@ -17,7 +17,6 @@ import asyncio
 
 import pytest
 
-from src.components.database import ComponentDatabase
 from src.core.circuit_ir import ComponentType
 from src.core.component_resolver import infer_component_type, role_to_component_type
 from src.llm.clarification import WORKING_TOPOLOGIES

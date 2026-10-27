@@ -13,8 +13,6 @@ import pytest
 from src.components.parametric import (
     IndexedPart,
     ParametricIndex,
-    ParsedQuery,
-    ValueConstraint,
     is_package_token,
     lowest_unit_price,
     parse_query,
@@ -357,7 +355,6 @@ class TestIndexBuildFromSqlite:
             return "resistor"
         if catalog_category == "Capacitors":
             return "capacitor"
-        from src.components.parameters import category_from_parameters
 
         return "unknown"
 

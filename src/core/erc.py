@@ -7,7 +7,7 @@ Validates circuits deterministically before emitting KiCad schematics or PCB lay
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType, Net
+from src.core.circuit_ir import CircuitIR, ComponentType, PinType
 
 
 class Severity(Enum):

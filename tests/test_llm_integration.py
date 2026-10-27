@@ -5,16 +5,10 @@ Tests for LLM Integration module.
 import json
 import pytest
 from src.llm.integration import (
-    MockLLMClient,
-    LLMProvider,
     CircuitRequirement,
-    CircuitSpecification,
     RequirementParser,
     CircuitSpecificationGenerator,
-    NLToCircuitPipeline,
     create_nl_pipeline,
-    REQUIREMENT_SCHEMA,
-    SPECIFICATION_SCHEMA,
 )
 from src.llm.providers import MockLLMClient, LLMProvider, create_llm_client
 

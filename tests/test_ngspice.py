@@ -2,7 +2,6 @@
 Unit tests for ngspice simulation integration.
 """
 
-import pytest
 from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType
 from src.simulation.ngspice import CircuitIRToSpice, NgSpiceRunner
 

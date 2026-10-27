@@ -6,12 +6,11 @@ Exports KiCad PCB designs to glTF 2.0 format for web-based 3D visualization.
 
 import json
 import struct
-import uuid
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-from src.core.circuit_ir import CircuitIR, Component, ComponentType
+from src.core.circuit_ir import CircuitIR, Component
 
 
 @dataclass
@@ -274,7 +273,6 @@ class GLTFExporter:
 
     def add_component(self, component: Component, footprint_map: Dict[str, Dict]) -> int:
         """Add a component as a 3D model."""
-        footprint = footprint_map.get(component.footprint, {})
         pkg = component.footprint.lower()
         
         # Determine dimensions from footprint
@@ -327,7 +325,7 @@ class GLTFExporter:
         
         self.nodes.append(GLTFNode(
             name=component.ref,
-            mesh=len(self.meshes) - 1,
+            mesh=mesh_idx,
             translation=[pos[0], pos[1], dims[2] / 2 + 0.8],
             rotation=q,
             scale=[1, 1, 1]
@@ -337,13 +335,11 @@ class GLTFExporter:
 
     def export_gltf(self, output_path: Path, board_width: float = 100, board_height: float = 80) -> None:
         """Export complete glTF file."""
-        import math
         
         # Add board
         self.add_board(board_width, board_height)
         
         # Add components
-        footprint_map = {}
         for ref, comp in self.circuit.components.items():
             self.add_component(comp, {})
         
@@ -378,10 +374,6 @@ class GLTFExporter:
                     "pbrMetallicRoughness": mat.pbrMetallicRoughness
                 }
                 for mat in self.materials
-            ],
-            "meshes": [
-                {"primitives": mesh.primitives}
-                for mesh in self.meshes
             ],
             "accessors": [
                 {
