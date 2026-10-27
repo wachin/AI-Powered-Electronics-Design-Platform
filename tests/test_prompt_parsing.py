@@ -182,15 +182,15 @@ class TestReviewSeesTheRealInput:
 
     @pytest.fixture()
     def real_db(self):
-        import os
-        from pathlib import Path
 
+        from conftest import real_catalog_path
+
+        catalog = real_catalog_path()
+        if catalog is None:
+            pytest.skip("no component catalog found (run: make catalog)")
         from src.components.database import ComponentDatabase
 
-        path = os.environ.get("JLC_PARTS_CATALOG")
-        if not path or not Path(path).exists():
-            pytest.skip("JLC_PARTS_CATALOG is not set to a real catalog")
-        return ComponentDatabase(Path(path))
+        return ComponentDatabase(catalog)
 
     def circuit(self):
         from src.core.circuit_ir import CircuitIR, Component, ComponentType, PinType

@@ -132,7 +132,8 @@ commands and their output; what you could not verify; and what you left open.
 
 Almost every bug in this project came from a plausible value that nobody checked:
 26 invented KiCad symbol names, 5 template symbols that do not exist, 7 part
-numbers that were never in the catalog, and a setup command that could not run.
+numbers that were never in the catalog, and a test job that downloaded 373 MB and
+then skipped every test that needed it.
 Each one produced output that looked complete and was not.
 
 So if you brief your agent on nothing else, brief it on this: **look it up, or say

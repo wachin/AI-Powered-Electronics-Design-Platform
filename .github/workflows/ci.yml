@@ -140,6 +140,25 @@ jobs:
           python -m src.cli catalog-setup
           python -m src.cli catalog-status
 
+      # The job's whole purpose is to run these tests against the catalog, and it
+      # used to download 373 MB and then skip them all, because the fixtures only
+      # looked at JLC_PARTS_CATALOG. Assert that the catalog is visible the way
+      # the application and the tests now find it, so a download that lands
+      # somewhere unread fails here instead of silently verifying nothing.
+      - name: Assert the catalog is visible to the tests
+        env:
+          DSH_REQUIRE_CATALOG: "1"
+        run: |
+          python - <<'PY'
+          import sys
+          from src.components.database import ComponentDatabase
+          db = ComponentDatabase()
+          if not db.using_jlcparts:
+              print("::error::the catalog was downloaded but is not visible to the app")
+              sys.exit(1)
+          print("catalog visible:", db.count(), "components")
+          PY
+
       # Several behaviours differ when a real catalog is installed: part
       # substitution returns catalog parts rather than curated ones, and the
       # category taxonomy is derived from the catalog rather than assumed. Those

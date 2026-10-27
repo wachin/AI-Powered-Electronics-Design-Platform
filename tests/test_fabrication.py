@@ -359,7 +359,12 @@ class TestDiagnose:
         main(["--diagnose"])
         output = capsys.readouterr().out
         assert "catalog" in output
-        if "ABSENT" in output:
+        # Look at the catalog's own line, not at whether "ABSENT" appears
+        # anywhere: in CI pcbnew or freerouting are often absent, and a loose
+        # marker made this assertion fire on a machine that had a catalog.
+        catalog_lines = [l for l in output.splitlines() if l.strip().startswith("catalog")]
+        assert catalog_lines
+        if "ABSENT" in catalog_lines[0]:
             # When the catalog is absent it must say what that costs and how to
             # get one, not just that it is missing.
             assert "36 templates" in output

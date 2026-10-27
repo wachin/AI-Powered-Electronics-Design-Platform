@@ -624,12 +624,14 @@ class TestAgainstTheRealCatalog:
 
     @pytest.fixture()
     def real_db(self):
-        import os
+        from conftest import real_catalog_path
 
-        path = os.environ.get("JLC_PARTS_CATALOG")
-        if not path or not Path(path).exists():
-            pytest.skip("JLC_PARTS_CATALOG is not set to a real catalog")
-        return ComponentDatabase(Path(path))
+        catalog = real_catalog_path()
+        if catalog is None:
+            pytest.skip("no component catalog found (run: make catalog)")
+        from src.components.database import ComponentDatabase
+
+        return ComponentDatabase(catalog)
 
     def test_builtin_part_numbers_are_not_orderable(self, real_db):
         """

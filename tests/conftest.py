@@ -90,3 +90,35 @@ requires_kicad = pytest.mark.skipif(
     not (kicad_available() and kicad_is_supported()) and not REQUIRE_KICAD,
     reason=kicad_skip_reason(),
 )
+
+
+def real_catalog_path():
+    """
+    A real, usable component catalog, found the way the application finds it.
+
+    The fixtures used to read ``JLC_PARTS_CATALOG`` only, so a machine with the
+    catalog in the default location skipped these tests — including the CI job
+    that had just downloaded 373 MB into the cache and then verified none of it.
+    """
+    import os
+    from pathlib import Path
+
+    try:
+        from src.components.jlcparts import default_catalog_path
+    except Exception:  # pragma: no cover - the import is cheap and always works
+        return None
+
+    candidates = []
+    from_env = os.environ.get("JLC_PARTS_CATALOG")
+    if from_env:
+        candidates.append(Path(from_env))
+    candidates.append(default_catalog_path())
+    candidates.append(Path(__file__).resolve().parent.parent / "jlcparts.sqlite3")
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 1_000_000:
+                return candidate
+        except OSError:
+            continue
+    return None

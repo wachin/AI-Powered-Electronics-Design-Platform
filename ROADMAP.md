@@ -739,6 +739,29 @@ Find open-source projects that could help.
   [40573211366](https://github.com/wachin/AI-Powered-Electronics-Design-Platform/actions/runs/40573211366):
   909 passed, 17 skipped, and the lint, compile-check and frontend jobs all
   pass. Before this audit, every run of the workflow had failed.
+- [x] **FIXED - The weekly catalog job verified nothing.** It downloaded the
+  373 MB catalog successfully and then every catalog-dependent test **skipped**,
+  because the fixtures read `JLC_PARTS_CATALOG` only and never the application's
+  own discovery — the download lands in the XDG cache, not in that variable. The
+  job has therefore never run the tests it exists for. The fixtures now resolve
+  the catalog the way the app does (`tests/conftest.py::real_catalog_path`), and
+  the job asserts the catalog is visible to the app before running the suite, so
+  a download that lands somewhere unreadable fails on one line instead of
+  skipping silently.
+- [x] **FIXED** - Two failures that only appeared **with** a catalog, which is
+  why the job never showed them: a `--diagnose` test looked for `"ABSENT"`
+  anywhere in the output (any missing tool satisfied it) and broke when the
+  catalog was present; and a purchase test simulated "no catalog" with a
+  nonexistent `JLC_PARTS_CATALOG`, which discovery simply stepped past, so it
+  found the cached catalog. Both are isolated properly now.
+- [x] **FIXED** - The download progress read `683%`: the server gzips, so
+  `Content-Length` describes the compressed body while the written bytes are
+  decompressed. The percentage is now only printed while the total still holds,
+  and MiB alone otherwise.
+- [x] **VERIFIED** - Upstream's catalog has grown since the copy in this
+  checkout: the download is now **482,665 components** (the local copy says
+  179,894), so the weekly job also catches taxonomy drift for free.
+
 - [x] **IMPLEMENTED** - The README's static test-count badge (which read "249
   passing" while the suite ran 909) is replaced by the live CI badge, which is
   the one thing that cannot go stale. The note above it said a CI badge would
@@ -763,10 +786,13 @@ Find open-source projects that could help.
 - [x] **IMPLEMENTED** - Ruff as a dev dependency, configured at
   `target-version = "py310"` with the pyflakes rules, and enforced in CI by a new
   `lint` job.
-- [x] **FIXED** - **`catalog-setup` was broken.** The archive extraction used
-  `zipfile`, `struct` and `zlib` without importing any of them, so the setup
-  command the docs tell you to run first failed with `NameError` on every run.
-  Found by ruff (`F821`), in the code path that downloads the catalog.
+- [x] **FIXED** - **The archive-extraction helpers could not run.** They used
+  `zipfile`, `struct` and `zlib` without importing any of them (ruff `F821`).
+  **Correction:** an earlier version of this entry said `catalog-setup` itself
+  was broken. It was not: `download_catalog` fetches a single SQLite file, so the
+  extraction helpers are never reached on the default path. The imports are fixed
+  and the helpers are tested directly, but the command always worked — the claim
+  was overstated and is corrected here.
 - [x] **FIXED** - **The package could not be imported on Python 3.10 or 3.11.**
   `jlcparts.py` used a backslash inside an f-string, which is a `SyntaxError`
   before 3.12, while `pyproject.toml` declares `requires-python = ">=3.10"` and

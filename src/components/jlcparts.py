@@ -632,8 +632,10 @@ class JLCPartsDatabase:
         """
         Locate the component catalog, in order of preference.
 
-        The `JLC_PARTS_CATALOG` environment variable wins, which makes it easy to
-        point at a catalog kept somewhere unusual. Repository-relative paths come
+        The `JLC_PARTS_CATALOG` environment variable is tried first, which makes
+        it easy to point at a catalog kept somewhere unusual. It is a hint rather
+        than an override: if the path does not exist, discovery continues to the
+        standard locations rather than failing. Repository-relative paths come
         next, so running from the project directory finds a checked-out catalog,
         and the per-user cache is the normal location.
         """
@@ -1680,6 +1682,10 @@ def download_catalog(
     try:
         with requests.get(url, stream=True, timeout=timeout) as response:
             response.raise_for_status()
+            # Content-Length describes the *transferred* body, which is gzip
+            # when the server compresses; iter_content yields the decompressed
+            # bytes. Comparing the two produced "683%" of a 51 MiB file that was
+            # 373 MiB on disk, so the total is only trusted while it still holds.
             total = int(response.headers.get("content-length") or 0)
             written = 0
             reported = 0
@@ -1689,13 +1695,16 @@ def download_catalog(
                         continue
                     out.write(chunk)
                     written += len(chunk)
-                    if progress and total and written - reported >= (10 << 20):
+                    if progress and written - reported >= (10 << 20):
                         reported = written
-                        print(
-                            f"  {written / (1 << 20):5.1f} / "
-                            f"{total / (1 << 20):.1f} MiB "
-                            f"({written * 100 // total}%)"
-                        )
+                        if total and written <= total:
+                            print(
+                                f"  {written / (1 << 20):5.1f} / "
+                                f"{total / (1 << 20):.1f} MiB "
+                                f"({written * 100 // total}%)"
+                            )
+                        else:
+                            print(f"  {written / (1 << 20):5.1f} MiB")
     except Exception as exc:
         partial.unlink(missing_ok=True)
         raise RuntimeError(
