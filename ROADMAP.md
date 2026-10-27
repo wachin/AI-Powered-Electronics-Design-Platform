@@ -696,6 +696,45 @@ Find open-source projects that could help.
 
 ---
 
+## Preparing the repository for agent-assisted development
+
+- [x] **IMPLEMENTED** - `AGENTS.md` now opens with how to work here — commands,
+  the venv rule, the six rules a change must satisfy, where to start reading —
+  and keeps the dependency/licensing policy below it. `docs/development.md` is
+  the depth: setup, the pipeline stage map, a module table, seven extension
+  recipes (add a topology, a template, a pinout, a catalog category, a review
+  rule, an ERC rule, a CLI flag), the testing patterns, and a pitfall table.
+- [x] **IMPLEMENTED** - `Makefile` with every routine command behind one entry
+  point (`make test`, `make test-catalog`, `make lint`, `make diagnose`,
+  `make demo`, `make compile-check`). All of them were run before being
+  documented.
+- [x] **IMPLEMENTED** - `ai-electronics-design --diagnose`: reports which external
+  tools are installed, measured rather than assumed, and says what a run will
+  omit without them. Written because "why was that stage skipped?" was answered
+  by reading the code.
+- [x] **IMPLEMENTED** - Ruff as a dev dependency, configured at
+  `target-version = "py310"` with the pyflakes rules, and enforced in CI by a new
+  `lint` job.
+- [x] **FIXED** - **`catalog-setup` was broken.** The archive extraction used
+  `zipfile`, `struct` and `zlib` without importing any of them, so the setup
+  command the docs tell you to run first failed with `NameError` on every run.
+  Found by ruff (`F821`), in the code path that downloads the catalog.
+- [x] **FIXED** - **The package could not be imported on Python 3.10 or 3.11.**
+  `jlcparts.py` used a backslash inside an f-string, which is a `SyntaxError`
+  before 3.12, while `pyproject.toml` declares `requires-python = ">=3.10"` and
+  CI only tested 3.12. The escape moved into a helper. CI now lints at 3.10.
+- [x] **FIXED** - Four dead duplicate methods (`health_check` ×3,
+  `detect_pin_conflicts`), two dictionaries with a repeated key (`min_order`,
+  `meshes` — harmless because the values were identical, which is how they
+  survived), 90 unused imports, and a dozen unused locals. One of them was a
+  weak test: `test_sandbox_cleanup` collected the temp directories before the
+  test and never compared them, so it passed even if the sandbox leaked a
+  directory. It now compares.
+- [x] **VERIFIED** - 911 tests pass without the catalog and 923 with it, after the
+  cleanup; `ruff check src/ tests/` is clean.
+
+---
+
 # 9. CIRCUIT VALIDATION
 
 - [x] **IMPLEMENTED** - ERC engine in src/core/erc.py with 6 validation rules + unit tests

@@ -1,5 +1,102 @@
 # AGENTS.md
 
+Working guide for AI coding agents, and the non-negotiable policy for this
+repository. The practical half is first because that is what you need before your
+first edit; the policy half must be read before you touch dependencies, licensing
+or anything inspired by a commercial product.
+
+---
+
+# Working in this repository
+
+## Read this first
+
+* **`docs/development.md`** — setup, commands, the module map, extension recipes
+  and the pitfalls. It is the document to trust when this file is not specific
+  enough.
+* **`README.md`** — what the product does and, importantly, what it does not do
+  yet. The "Known Limitations" section is honest by design.
+* **`ROADMAP.md`** — what is finished (with the evidence) and what is open.
+
+## The commands
+
+```bash
+make                    # list every target
+make diagnose           # what this machine can actually do
+make test               # the suite without the component catalog (~2-4 min)
+make lint               # ruff: undefined names, unused imports, duplicated keys
+make demo               # build a design into output_design/demo
+make compile-check      # byte-compile everything, as CI does
+```
+
+Two rules about the environment, both of which have cost time:
+
+* **Always use the venv**: `venv/bin/python`, not `python3`. The only exception
+  is `pcbnew`, which exists only in the system interpreter; the code finds it
+  itself and you do not need to.
+* **Run the suite both ways.** Without the catalog some tests skip; with it they
+  run. A change that only passes one way is broken.
+
+```bash
+venv/bin/python -m pytest tests/ -q                      # without the catalog
+JLC_PARTS_CATALOG=/path/to/jlcparts.sqlite3 \
+  venv/bin/python -m pytest tests/ -q                    # with it
+```
+
+`make test-catalog CATALOG=/path/to/catalog.sqlite3` does the second.
+
+## What this codebase demands of a change
+
+Almost every bug in this project came from a plausible value that nobody checked.
+These rules are the defence, and a reviewer will ask for them:
+
+1. **Never invent a value that can be looked up.** A KiCad symbol, a footprint, a
+   part number, a price, a junction temperature, a pin number. Look it up, or say
+   it is not known. Earlier versions invented 26 symbol names and 5 template
+   symbols; every design using them looked complete and could not be built.
+2. **A check you cannot complete is `[?]`, not `✅`.** The electrical review has
+   three states: `ok`, `fail`, `unknown` with the reason. Do not assume a
+   datasheet figure to keep the output uniform. Do not assume θJA.
+3. **Report, never hide.** A narrowed trace, a substituted part number, an
+   assumed voltage: warnings that stay warnings. Nothing reduces a real problem to
+   a green tick.
+4. **Prefer the real tool.** KiCad, `kicad-cli`, FreeRouting, ngspice. Do not
+   reimplement a plotter.
+5. **A test that reads reality beats a test that restates the code.** If a fact
+   lives in an installed library or a downloaded file, the test opens it.
+6. **Prove the claim you put in the docs**, or write "verified manually on
+   <date>".
+
+`docs/development.md` explains each of these with the bug that produced it.
+
+## Before you finish
+
+```bash
+make lint && make compile-check && make test
+```
+
+Then update `README.md` (the feature and its honest limits) and `ROADMAP.md`
+(what was done, with evidence, and what stays open). A `[ ] **OPEN**` item with
+the reason is worth more than a feature claimed and not finished.
+
+## Where to start reading
+
+| You want to change… | Start at |
+|---|---|
+| how a prompt becomes a design | `src/llm/integration.py`, `src/agents/orchestrator.py` |
+| what a design is | `src/core/circuit_ir.py` |
+| which parts are available | `src/components/jlcparts.py`, `src/components/database.py` |
+| the electrical rules | `src/core/erc.py`, `src/core/design_review.py` |
+| symbols, footprints, placement | `src/core/component_resolver.py`, `src/generators/` |
+| trace widths and routing | `src/pcb/netclasses.py`, `src/routing/freerouting.py` |
+| what the user can order | `src/components/ordering.py`, `src/generators/fabrication.py` |
+
+Three modules are implemented and tested but **not wired into the pipeline**:
+`src/security/permissions.py`, `src/security/sandbox.py` and
+`src/agents/ai_agent.py`. Do not assume they run.
+
+---
+
 # External Repositories Policy
 
 ## Purpose

@@ -8,7 +8,7 @@
 -->
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-249%20passing%2C%202%20skipped-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-911%20passing%2C%2015%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -23,9 +23,64 @@ KiCad schematic and PCB, a bill of materials you can order, and Gerber files you
 can send to a board house.
 
 **What works today:** the full path from prompt to an ERC-clean, **auto-routed**
-KiCad project with a correct netlist, Gerbers and drill files. **Not yet:**
-datasheet understanding and multi-turn clarification. See
+KiCad project with a correct netlist, an orderable parts list, Gerbers, drill
+files and a position file — and it asks about anything you left unstated instead
+of guessing. **Not yet:** datasheet understanding: part pinouts come from a table
+of known families, so an IC outside it gets no pins and the design says so. See
 [Known Limitations](#known-limitations).
+
+---
+
+## Build this with your own AI agent
+
+**Fork it.** This repository is arranged to be a good place to point an AI coding
+agent at, and the arrangement is deliberate: the `AGENTS.md` at the root is read
+automatically by most tools, `docs/development.md` carries the depth, `make` holds
+every command, and the test suite is the specification — it reads the installed
+KiCad libraries, the real component catalog and the files the pipeline emits,
+rather than restating a table the code could drift from.
+
+Whether your agent is Claude Code, Codex, Cursor, Copilot, Aider, Gemini CLI or
+something you wrote yourself, the first hour looks the same:
+
+```bash
+git clone https://github.com/wachin/AI-Powered-Electronics-Design-Platform
+cd AI-Powered-Electronics-Design-Platform
+python3 -m venv venv && venv/bin/pip install -e ".[dev]"
+make diagnose                  # what this machine can actually do
+make test                      # 911 passing, 15 skipped without the catalog
+```
+
+Then give the agent three things: `AGENTS.md`, `docs/development.md`, and a
+concrete task from the list below.
+
+**Good first tasks**, roughly in order of how much you learn:
+
+1. **Teach it a new topology.** `docs/development.md` has the recipe; the test in
+   `tests/test_topologies.py` will tell you whether the design actually builds.
+2. **Add an electrical review rule** that catches something the current rules
+   miss — a reverse-biased electrolytic, an inductor saturating, a divider
+   drawing too much current. `src/core/design_review.py` is where the numbers
+   live.
+3. **Close an open item** from `ROADMAP.md`. They are marked `[ ] **OPEN**` with
+   the reason they are open, which is usually a better brief than a feature
+   request.
+
+### The one thing to tell your agent
+
+Almost every bug in this project came from a plausible value that nobody checked:
+26 invented KiCad symbol names, 5 template symbols that do not exist, 7 part
+numbers that were never in the catalog, and a setup command that could not run.
+Each one produced output that looked complete and was not.
+
+So if you brief your agent on nothing else, brief it on this: **look it up, or say
+you do not know.** The review reports `[?]` with a reason rather than a green tick
+it did not earn, and a change that invents a figure to keep the output tidy will be
+rejected — by the tests, or by a reviewer.
+
+Fork it, break it, improve it. It is GPLv3, so anything you build on it stays
+open in the same way, and a pull request that makes the platform more honest about
+itself is always welcome.
 
 ---
 
@@ -635,28 +690,49 @@ Options:
   --mcp-validate            Also validate with an MCP server (needs mcp-setup)
   --no-spice                Disable SPICE simulation
   --no-routing              Disable PCB auto-routing
+  --ask / --no-ask          Ask about anything the request leaves open. The
+                            default is to ask when run from a terminal
+  --diagnose                Report which external tools are installed, then exit
 
 Subcommands:
   catalog-status            Show the component catalog in use
   catalog-setup [--dest P]  Download the full component catalog (~145 MB)
   parts-search "10k 0603"   Search it by value, package, tolerance, rating
   parts-substitute C12345   Find replacements, with what was verified
+  mcp-status                Show optional MCP server availability
+  mcp-setup [--server X]    Create isolated environments for MCP servers
 
 Design options relevant to ordering:
   --boards N                How many boards you are building (default 1)
   --spares FRACTION         Extra parts allowance, e.g. 0.1 for 10%
   --ambient C               Ambient temperature for the thermal budget (default 25)
+```
 
 The default provider is `mock`, which means **no model at all**: your prompt is
 parsed with rules and the design comes from the built-in templates. It reads your
 prompt — write `"12V to 3.3V LDO at 2A"` and you get those numbers, not a canned
 answer.
-  mcp-status                Show optional MCP server availability
-  mcp-setup [--server X]    Create isolated environments for MCP servers
-```
 
 The CLI exits with status `1` and a clear message when a design cannot be made
 to pass validation, rather than emitting a project that does not work.
+
+`--diagnose` is the first thing to run on a new machine:
+
+```text
+$ ai-electronics-design --diagnose
+  Python        3.13.5  (…/venv/bin/python3)
+  kicad-cli     9.0.2  (/usr/bin/kicad-cli)
+  symbols       found
+  footprints    found
+  pcbnew        /usr/bin/python3 (routing can export a DSN)
+  ngspice       ** ngspice-44.2 : Circuit level simulation program
+  freerouting   …/libs/freerouting/freerouting.jar
+  java          /usr/lib/jvm/java-1.25.0-openjdk-amd64/bin/java (FreeRouting needs 25+)
+  catalog       179,894 in-stock parts in 44 categories
+--------------------------------------------------------------
+Everything is available: a design can be built, validated, simulated, routed
+and manufactured here.
+```
 
 ### Example Prompts
 
@@ -1750,15 +1826,43 @@ If you contribute:
 2. You represent that you have the right to contribute the code
 3. You accept the project's license
 
+### Working on this repository
+
+If you are extending the platform — or pointing an AI coding agent at it — start
+with these three, in this order:
+
+| File | For |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | The rules: what the codebase demands of a change, and the dependency/licensing policy |
+| [`docs/development.md`](docs/development.md) | Setup, commands, module map, extension recipes, pitfalls |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | The short version, and what a pull request is expected to include |
+
+```bash
+make                 # every target
+make diagnose        # what this machine can do
+make lint            # ruff: undefined names, unused imports, duplicated keys
+make test            # the suite, without the component catalog
+make test-catalog CATALOG=/path/to/jlcparts.sqlite3
+```
+
+Two things worth knowing before your first edit: the suite is run **both** with
+and without the component catalog (some tests skip without it, and a change that
+only passes one way is broken), and almost every bug in this project came from a
+plausible value that nobody checked — which is why `make lint` refuses undefined
+names and why the tests read the installed KiCad libraries instead of restating
+a table.
+
 ### Related documentation
 
 | File | Purpose |
 |---|---|
+| `docs/development.md` | Developer and agent guide: setup, recipes, pitfalls |
+| `CONTRIBUTING.md` | Contribution guide and checks before a pull request |
 | `ROADMAP.md` | Development plan, with a verified "what is wired in vs orphaned" section |
 | `docs/llm-pipeline.md` | LLM pipeline architecture, postmortem, and verification status |
 | `docs/llm-model-recommendations.md` | Choosing and running a model |
 | `CREDITS.md` | Third-party dependencies, licenses, and the KiCad library exception |
-| `AGENTS.md` | Agent policies for external repositories |
+| `AGENTS.md` | Working guide for AI agents, and the external-repository policy |
 | `LEGAL_NOTICE.md` / `LEGAL_DISCLAIMER.md` | Legal notices |
 | `research/flux-ai-patent-search.md` | Patent search and independence verification |
 | `research/repository_catalog.md` | Evaluated open-source projects and their licenses |
