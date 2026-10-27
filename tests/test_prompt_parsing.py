@@ -235,4 +235,12 @@ class TestReviewSeesTheRealInput:
             self.circuit(), real_db,
             {"input_voltage": 12.0, "output_voltage": 3.3, "output_current": 0.5},
         )
-        assert any("same family" in a for a in review.assumptions), review.assumptions
+        # Two legitimate sources: a variant in the same family, or another
+        # catalogue row for the same part number. Which one applies depends on
+        # the catalog, so the assertion is about the property — the review says
+        # where the figure came from — not about the wording.
+        assert any(
+            "125" in assumption
+            and ("same family" in assumption or "same part number" in assumption)
+            for assumption in review.assumptions
+        ), review.assumptions

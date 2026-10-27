@@ -144,7 +144,12 @@ class TestPurchaseListArtifacts:
         completes, and the purchase list states the limitation instead of
         implying an order is possible.
         """
+        # A nonexistent JLC_PARTS_CATALOG is a hint, not an override: discovery
+        # then falls through to the cache, which on CI holds the catalog the job
+        # just downloaded, and every part becomes orderable. Isolate the cache
+        # too, or this test depends on what else is installed.
         monkeypatch.setenv("JLC_PARTS_CATALOG", str(tmp_path / "absent.sqlite3"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "empty-cache"))
         summary = self._run(tmp_path)
         purchase = summary.purchase_list
         assert purchase.lines
