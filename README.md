@@ -66,6 +66,68 @@ concrete task from the list below.
    the reason they are open, which is usually a better brief than a feature
    request.
 
+### The prompt to hand your agent
+
+Copy this into your agent to pick development up where it was left. If you have a
+specific task, replace the "Pick one task" section with it; everything else should
+stay, because it is what stops an agent from producing a design that looks right
+and is not.
+
+```text
+You are working on the AI-Powered Electronics Design Platform, a Python project that
+turns a natural-language circuit request into a validated, manufacturable KiCad
+project: it specifies the circuit, checks it against real parts and electrical
+rules, routes the board, and writes the BOM, Gerbers, drill files and position file.
+
+Read first, in this order:
+  1. AGENTS.md             the rules a change must satisfy, and the dependency policy
+  2. docs/development.md   setup, commands, the module map, extension recipes, pitfalls
+  3. ROADMAP.md            what is finished and what is open, with the evidence
+
+Verify the environment before changing anything, and note the baseline yourself so you
+can tell whether your change moved it:
+  make diagnose        which external tools this machine actually has
+  make test            record the pass and skip counts before you touch anything
+
+Rules that are not negotiable in this repository:
+- Never invent a value that can be looked up: a KiCad symbol, a footprint, a part
+  number, a price, a junction temperature, a pin number. Look it up, or report that it
+  is unknown. 26 invented symbol names and 7 invented part numbers already shipped
+  here, and each one produced a design that looked complete and could not be built.
+- A check you cannot complete is "[?]" with the reason, never a green tick you did
+  not earn. Do not assume theta-JA, or any datasheet figure you have not read.
+- Report problems; never hide them behind a passing result.
+- Prefer the real external tool (KiCad, kicad-cli, FreeRouting, ngspice) to a
+  reimplementation.
+- If a fact lives in an installed library or a downloaded file, write the test so it
+  reads that library or file, rather than restating an internal table.
+
+Pick one task, in this order of preference:
+  1. an item marked `[ ] OPEN` in ROADMAP.md (each states why it is open);
+  2. a defect you can reproduce, with the command and its output;
+  3. if neither: propose two or three candidates and wait for me to choose.
+
+Work in small steps. For each one, write the test first, watch it fail, then make it
+pass. Before you report back, run and show me the real output of:
+  make lint
+  make compile-check
+  make test
+  make test-catalog CATALOG=<path>    if a component catalog is available
+
+Done means: a test that fails without the change; README.md updated for anything
+user-visible, including the limitation it does not solve; ROADMAP.md updated with what
+was done, the evidence, and what stays open; and every command above green.
+
+Ask me before: adding a dependency, changing the CLI's public interface, touching
+anything under the licensing or reference-repository policy, or deleting files you
+did not create.
+
+Report at the end: what you changed and why; what you verified and how, with the
+commands and their output; what you could not verify; and what you left open.
+```
+
+***
+
 ### The one thing to tell your agent
 
 Almost every bug in this project came from a plausible value that nobody checked:
