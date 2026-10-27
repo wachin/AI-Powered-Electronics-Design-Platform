@@ -52,12 +52,29 @@ jobs:
       # read it: `kicad-cli sch export netlist`, `kicad-cli pcb drc`, and Gerber
       # export. KiCad also supplies the symbol and footprint libraries that the
       # generators read at runtime, so this is a real dependency, not a nicety.
-      - name: Install KiCad and ngspice
+      #
+      # It has to be KiCad 9. The distribution package on the runner is 7, which
+      # rejects the 8/9 board format this project writes ("Unknown token
+      # 'generator_version'") and resolves none of the symbol libraries, so a
+      # whole test job failed on a tool version that was never what the project
+      # was developed against. The PPA provides 9, and the next step asserts it
+      # rather than assuming the PPA did what it promised.
+      - name: Install KiCad 9 and ngspice
         run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends kicad ngspice
           kicad-cli --version
           ngspice --version | head -1
+
+      - name: Assert the KiCad version
+        run: |
+          version="$(kicad-cli version)"
+          echo "kicad-cli: $version"
+          case "$version" in
+            9.*) echo "KiCad 9 present" ;;
+            *) echo "::error::This project requires KiCad 9; got $version"; exit 1 ;;
+          esac
 
       - name: Install Python dependencies
         run: |
@@ -85,11 +102,14 @@ jobs:
           cache: pip
 
       # KiCad supplies the symbol and footprint libraries the generators read at
-      # runtime; without them these tests skip instead of running.
-      - name: Install KiCad and ngspice
+      # runtime; without them these tests skip instead of running. Same version
+      # requirement as the other test job: 9.
+      - name: Install KiCad 9 and ngspice
         run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends kicad ngspice
+          kicad-cli --version
 
       - name: Install Python dependencies
         run: |

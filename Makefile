@@ -19,7 +19,18 @@ OUTPUT  ?= output_design/demo
 F       ?= tests
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-catalog test-file lint compile-check diagnose demo catalog clean frontend
+.PHONY: help check-venv install test test-catalog test-file lint compile-check diagnose demo catalog clean frontend
+
+# Every target below needs the venv. A fresh clone does not have one yet, and
+# "make test" there used to fail with "venv/bin/python: No such file or
+# directory", which tells a newcomer nothing about what to do next.
+check-venv:
+	@test -x "$(PY)" || { \
+		echo "There is no virtualenv at $(PY)."; \
+		echo "Create it first:   make install"; \
+		echo "Or by hand:        python3 -m venv venv && venv/bin/pip install -e \"[dev]\""; \
+		echo "Details:           docs/development.md"; \
+		exit 1; }
 
 help: ## Show this help
 	@echo "Targets:"
@@ -32,35 +43,35 @@ install: ## Create the venv and install in editable mode (with dev tools)
 	python3 -m venv venv
 	$(PIP) install -e ".[dev]"
 
-test: ## Run the full suite without the component catalog
+test: check-venv ## Run the full suite without the component catalog
 	$(PY) -m pytest tests/ -q
 
-test-catalog: ## Run the full suite against the real catalog (needs CATALOG)
+test-catalog: check-venv ## Run the full suite against the real catalog (needs CATALOG)
 	@test -n "$(CATALOG)" || { \
 		echo "Set the catalog path: make test-catalog CATALOG=/path/to/jlcparts.sqlite3"; \
 		echo "Without it these tests skip, which is why 'make test' passes without them."; \
 		exit 1; }
 	JLC_PARTS_CATALOG=$(CATALOG) $(PY) -m pytest tests/ -q
 
-test-file: ## Run one file or directory: make test-file F=tests/test_erc.py
+test-file: check-venv ## Run one file or directory: make test-file F=tests/test_erc.py
 	$(PY) -m pytest $(F) -q
 
-lint: ## Ruff: undefined names, unused imports, shadowed definitions, duplicated keys
+lint: check-venv ## Ruff: undefined names, unused imports, shadowed definitions, duplicated keys
 	@$(PY) -m ruff --version >/dev/null 2>&1 || { \
 		echo "ruff is not installed: $(PIP) install ruff"; exit 1; }
 	$(PY) -m ruff check src/ tests/
 
-compile-check: ## Byte-compile everything, as CI does
+compile-check: check-venv ## Byte-compile everything, as CI does
 	$(PY) -m compileall -q src main.py && echo "compile-check ok"
 
-diagnose: ## Report which external tools are installed
+diagnose: check-venv ## Report which external tools are installed
 	$(CLI) --diagnose
 
-demo: ## Build a demonstration design into OUTPUT
+demo: check-venv ## Build a demonstration design into OUTPUT
 	$(CLI) -p "5V to 3.3V LDO with an LED indicator" -o $(OUTPUT) --no-spice --no-routing
 	@echo "Wrote $(OUTPUT)"
 
-catalog: ## Download the component catalog (146 MB, one time)
+catalog: check-venv ## Download the component catalog (146 MB, one time)
 	$(CLI) catalog-setup
 
 frontend: ## Build the web frontend

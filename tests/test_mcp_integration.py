@@ -52,9 +52,18 @@ class TestRegistry:
             get_spec("does-not-exist")
 
     def test_kicad_uses_system_python_for_native_bindings(self):
-        """pcbnew ships with KiCad's Python, not with our virtual environment."""
+        """
+        pcbnew ships with KiCad's Python, not with our virtual environment.
+
+        The PYTHONPATH trick only exists once the isolated environment has been
+        created: it is the path to that environment's packages. Asserting it
+        unconditionally made this test fail on a fresh clone, where the optional
+        server is not installed — which is every clone.
+        """
         spec = get_spec("kicad")
         assert spec.needs_system_python is True
+        if spec.site_packages is None:
+            pytest.skip("kicad MCP server not set up, so there is no PYTHONPATH yet")
         # The isolated environment still holds the server's own packages.
         assert "PYTHONPATH" in spec.launch_env()
 
@@ -234,13 +243,23 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_no_kicad_files_yields_unavailable(self, tmp_path):
+        """
+        Missing KiCad files are reported, not crashed on.
+
+        Which message you get depends on whether the optional server is
+        installed: without it validation stops earlier and says so. Both are the
+        graceful degradation this test is about, so both are accepted — the
+        specific string made this fail on every fresh clone.
+        """
         outcome = await validate_with_mcp(
             files={"other": tmp_path / "notes.txt"},
             workspace=tmp_path / "ws",
             project_name="p",
         )
         assert outcome.available is False
-        assert "no .kicad_sch" in outcome.error
+        assert ("no .kicad_sch" in outcome.error) or ("not set up" in outcome.error), (
+            outcome.error
+        )
 
 
 class TestServerManager:

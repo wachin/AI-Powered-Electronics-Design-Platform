@@ -9,7 +9,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Tests](https://img.shields.io/badge/tests-911%20passing%2C%2015%20skipped-brightgreen.svg)](tests/)
-[![KiCad](https://img.shields.io/badge/KiCad-8.x%20%7C%209.x-1a5fb4.svg)](https://www.kicad.org/)
+[![KiCad](https://img.shields.io/badge/KiCad-9.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
 [![LLM providers](https://img.shields.io/badge/LLM-Ollama%20%7C%20OpenAI--compatible%20%7C%20Anthropic-6f42c1.svg)](docs/llm-pipeline.md)
@@ -652,7 +652,7 @@ git clone --depth 1 https://github.com/yaqwsx/jlcparts /tmp/refs/jlcparts
 | **Circuit IR** | Custom (Python) | GPL-3.0 | ✅ Implemented |
 | **ERC** | Custom (Python) | GPL-3.0 | ✅ Implemented |
 | **Component DB** | JLCParts (yaqwsx/jlcparts) | MIT | ✅ Implemented |
-| **EDA Engine** | KiCad 8.x / 9.x (`kicad-cli`) | GPL-3.0 | ✅ Integrated |
+| **EDA Engine** | KiCad 9.x (`kicad-cli`) | GPL-3.0 | ✅ Integrated |
 | **Schematic/PCB Gen** | Custom S-expression compiler | GPL-3.0 | ✅ Implemented |
 | **Routing** | FreeRouting | GPL-3.0 | ✅ Working (needs Java 25 + the jar in `libs/freerouting/`) |
 | **Simulation** | ngspice | BSD-3-Clause | ✅ Integrated |
@@ -857,6 +857,23 @@ sudo apt-get install -y librepcb horizon-eda sch-rnd-sim pcb-rnd
 
 > On Debian and Ubuntu, `kicad-cli` ships inside the `kicad` package; a separate
 > `kicad-cli` package is not needed on current releases.
+
+> **KiCad 9 is required, not merely a recent KiCad.** The generated board uses the
+> 8/9 file format (`generator_version`, board version 20240108) and the symbol and
+> footprint readers target the 9 library layout. KiCad 7 — what Ubuntu's archive
+> provided until recently, and what this project's own CI installed, silently —
+> rejects every generated board with `Unknown token 'generator_version'` and
+> resolves none of the symbol libraries. On Debian 13 and current Ubuntu, `kicad`
+> is 9; on older releases use the KiCad PPA:
+>
+> ```bash
+> sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+> sudo apt-get update && sudo apt-get install -y kicad
+> kicad-cli version   # must start with 9.
+> ```
+>
+> The test suite skips the KiCad-dependent tests on an older version and says so,
+> rather than failing 125 times with an error that names a file token.
 
 #### Why Java 25 (`openjdk-25-jdk`)
 

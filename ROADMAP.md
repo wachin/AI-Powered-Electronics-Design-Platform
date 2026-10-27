@@ -696,6 +696,39 @@ Find open-source projects that could help.
 
 ---
 
+## Final review before handoff
+
+- [x] **FIXED - CI had never been green.** A clean checkout was audited by
+  following its own documentation, and `gh run list` showed every run of the
+  `CI` workflow failing. Two causes, neither visible locally:
+  - **CI installed KiCad 7** (`7.0.11`, the distribution package) while the
+    project is developed and verified against **KiCad 9**. KiCad 7 rejects the
+    generated board with `Unknown token 'generator_version'`, resolves none of
+    the symbol or footprint libraries, and fails `kicad-cli pcb drc` on an
+    argument count — 125 failures, all from a tool version that was never what
+    the project used. CI now installs KiCad 9 from the PPA **and asserts the
+    version**, so a future runner without it fails loudly instead of silently
+    testing the wrong thing.
+  - **Two tests depended on the optional MCP environment** being installed
+    locally. `test_kicad_uses_system_python_for_native_bindings` asserted a
+    `PYTHONPATH` that only exists once `mcp-setup` has run, and
+    `test_no_kicad_files_yields_unavailable` asserted one specific error string
+    out of two legitimate ones. Both skip or accept either state now.
+- [x] **FIXED - `make test` on a fresh clone died with
+  `venv/bin/python: No such file or directory`.** Every target now depends on a
+  `check-venv` guard that says what to run instead.
+- [x] **FIXED - The README claimed `KiCad 8.x | 9.x`.** Only 9 is tested and only
+  9 can read what the generator writes. The badge, the stack table and the
+  requirements section now say KiCad 9, with the PPA commands and the symptom an
+  older version produces. `--diagnose` flags an older `kicad-cli` in the same
+  words, and the test suite skips the KiCad tests on an old version instead of
+  failing 125 times.
+- [x] **FIXED - `requirements.txt` did not list `ruff`**, which is a dev
+  dependency in `pyproject.toml`; the two files are meant to mirror each other.
+- [x] **VERIFIED** - The documented onboarding path was walked in a clean
+  `git clone`: `make install` → `make lint` → `make compile-check` → `make test`
+  → `make diagnose`, and the audit itself is what found the two failures above.
+
 ## Preparing the repository for agent-assisted development
 
 - [x] **IMPLEMENTED** - `AGENTS.md` now opens with how to work here — commands,

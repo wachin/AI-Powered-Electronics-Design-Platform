@@ -647,9 +647,17 @@ def _run_diagnose() -> int:
     kicad_cli = kicad_cli_path()
     if kicad_cli:
         # The path matters: several KiCad versions can be installed, and
-        # DSH_KICAD_CLI picks between them.
+        # DSH_KICAD_CLI picks between them. The version matters more: the
+        # generated board uses the 8/9 file format, and a KiCad 7 rejects it.
         version = version_of(kicad_cli, "version") or "present"
-        print(f"  kicad-cli     {version}  ({kicad_cli})")
+        suffix = ""
+        try:
+            major = int(version.split(".")[0])
+            if major < 9:
+                suffix = "  ← too old: KiCad 9 is required, see README"
+        except (ValueError, IndexError):
+            pass
+        print(f"  kicad-cli     {version}  ({kicad_cli}){suffix}")
     else:
         print("  kicad-cli     ABSENT — no ERC, DRC, Gerbers or position file")
 

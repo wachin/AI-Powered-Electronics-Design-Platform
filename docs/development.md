@@ -19,7 +19,7 @@ plausible value that nobody checked, and those rules exist to stop that.
 | Tool | Why | Verified version |
 |---|---|---|
 | Python 3.10+ | The application | 3.13.5 |
-| KiCad 9 | Symbols, footprints, ERC, DRC, Gerbers | 9.0.2 |
+| KiCad **9** | Symbols, footprints, ERC, DRC, Gerbers | 9.0.2 |
 | ngspice | Simulation (`--no-spice` skips it) | 44.2 |
 | Java 17+ | FreeRouting (`--no-routing` skips it) | OpenJDK 25 |
 | Node 20+ | Only for the web frontend | — |
@@ -27,6 +27,17 @@ plausible value that nobody checked, and those rules exist to stop that.
 `ai-electronics-design --diagnose` prints what it found and what is missing.
 Nothing below fails hard when an optional tool is absent: the corresponding stage
 is skipped and says so.
+
+**KiCad 9 specifically, not "a recent KiCad".** The generated board uses the 8/9
+file format and the symbol and footprint readers target the 9 libraries; KiCad 7
+rejects every board with `Unknown token 'generator_version'` and resolves no
+symbols. On an older version the KiCad tests skip with the version in the message
+rather than failing, and `--diagnose` flags it. On Debian or Ubuntu without 9:
+
+```bash
+sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+sudo apt-get update && sudo apt-get install -y kicad
+```
 
 ### Install
 
