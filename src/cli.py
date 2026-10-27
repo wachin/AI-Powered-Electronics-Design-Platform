@@ -117,7 +117,7 @@ def _run_catalog_setup(force: bool, verbose: bool, dest: str | None = None) -> i
     optional — the platform works without it — but part selection and
     substitution are far better with it.
     """
-    from src.components.jlcparts import download_catalog, default_catalog_path
+    from src.components.jlcparts import download_catalog
 
     try:
         from pathlib import Path as _Path
@@ -421,6 +421,16 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help=(
+            "Report which of the external tools are installed (KiCad, ngspice, "
+            "Java and FreeRouting, pcbnew, the component catalog), then exit. "
+            "Run this first when something is missing."
+        ),
+        default=False,
+    )
+    parser.add_argument(
         "--no-routing",
         action="store_true",
         help="Disable PCB auto-routing (FreeRouting)",
@@ -594,6 +604,156 @@ async def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_diagnose() -> int:
+    """
+    Report what this machine can actually do.
+
+    Written for the first minute of a session: it answers "why did that stage get
+    skipped?" without the user having to read the code, and it names the exact
+    command or package that is missing. Every line is measured, not assumed: a
+    tool is reported present only if it ran and answered.
+    """
+    import os
+    import platform
+    import shutil
+    import subprocess
+    import sys as _sys
+
+    def version_of(executable: str, *arg_variants: str) -> str:
+        for args in arg_variants:
+            try:
+                result = subprocess.run(
+                    [executable, *args.split()], capture_output=True, text=True, timeout=20
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            # Take the first line that carries information. Tool banners are
+            # often a row of asterisks before the version.
+            for line in (result.stdout or result.stderr or "").splitlines():
+                line = line.strip()
+                if line and any(ch.isalnum() for ch in line):
+                    return line
+        return ""
+
+    print("=" * 62)
+    print("ai-electronics-design — environment")
+    print("=" * 62)
+    print(f"  Python        {platform.python_version()}  ({_sys.executable})")
+    print(f"  Platform      {platform.system()} {platform.release()}")
+
+    # -- KiCad -------------------------------------------------------------
+    from src.generators.fabrication import kicad_cli_path
+
+    kicad_cli = kicad_cli_path()
+    if kicad_cli:
+        # The path matters: several KiCad versions can be installed, and
+        # DSH_KICAD_CLI picks between them.
+        version = version_of(kicad_cli, "version") or "present"
+        print(f"  kicad-cli     {version}  ({kicad_cli})")
+    else:
+        print("  kicad-cli     ABSENT — no ERC, DRC, Gerbers or position file")
+
+    from src.generators.kicad_symbols import load_symbol
+    from src.generators.kicad_footprints import load_footprint
+
+    symbol_ok = load_symbol("Device:R") is not None
+    footprint_ok = load_footprint("Resistor_SMD:R_0603_1608Metric") is not None
+    print(f"  symbols       {'found' if symbol_ok else 'NOT FOUND — schematic generation will fail'}")
+    print(f"  footprints    {'found' if footprint_ok else 'NOT FOUND — PCB generation will fail'}")
+
+    # -- pcbnew, needed for routing ----------------------------------------
+    try:
+        from src.agents.mcp_registry import find_pcbnew_python
+
+        pcbnew_python = find_pcbnew_python()
+    except Exception as exc:  # pragma: no cover - defensive
+        pcbnew_python = None
+        print(f"  pcbnew        could not check: {exc}")
+    if pcbnew_python:
+        print(f"  pcbnew        {pcbnew_python} (routing can export a DSN)")
+    else:
+        print("  pcbnew        ABSENT — routing cannot run (it needs KiCad's python)")
+
+    # -- ngspice -----------------------------------------------------------
+    ngspice = shutil.which("ngspice")
+    if ngspice:
+        print(f"  ngspice       {version_of(ngspice, '--version') or 'present'}")
+    else:
+        print("  ngspice       ABSENT — simulation is skipped (--no-spice is implied)")
+
+    # -- routing -----------------------------------------------------------
+    try:
+        from src.agents.mcp_registry import find_freerouting_jar, find_java25
+
+        jar = find_freerouting_jar()
+        java = find_java25()
+    except Exception as exc:  # pragma: no cover - defensive
+        jar, java = None, None
+        print(f"  freerouting   could not check: {exc}")
+    if jar:
+        print(f"  freerouting   {jar}")
+    else:
+        print("  freerouting   ABSENT — no routing (the board keeps its ratsnest)")
+    if java:
+        print(f"  java          {java} (FreeRouting needs 25+)")
+    elif jar:
+        print("  java          ABSENT — a Java 25 runtime is needed for FreeRouting")
+
+    # -- catalog -----------------------------------------------------------
+    from src.components.jlcparts import default_catalog_path
+
+    catalog_env = os.environ.get("JLC_PARTS_CATALOG")
+    try:
+        from src.components.database import ComponentDatabase
+
+        db = ComponentDatabase()
+    except Exception as exc:  # pragma: no cover - defensive
+        db = None
+        print(f"  catalog       could not open: {exc}")
+    if db is not None:
+        if db.using_jlcparts:
+            path = getattr(db._jlcparts_db, "path", None) or catalog_env or "discovered"
+            try:
+                count = db.internal_category_counts()
+                total = sum(count.values())
+                detail = f"{total:,} in-stock parts in {len(count)} categories"
+            except Exception:
+                detail = "opened"
+            print(f"  catalog       {detail}")
+            print(f"                {path}")
+        else:
+            print(
+                f"  catalog       ABSENT — using {len(db._component_templates)} "
+                f"templates (no part numbers, prices or stock)"
+            )
+            print(
+                "                run: ai-electronics-design catalog-setup   "
+                f"(expected at {default_catalog_path()})"
+            )
+
+    # -- what that means for a run -----------------------------------------
+    missing = []
+    if not kicad_cli:
+        missing.append("Gerbers, position file, ERC")
+    if not pcbnew_python:
+        missing.append("routing")
+    if not ngspice:
+        missing.append("simulation")
+    if not (jar and java):
+        missing.append("auto-routing")
+    if db is None or not getattr(db, "using_jlcparts", False):
+        missing.append("real part numbers and prices")
+
+    print("-" * 62)
+    if missing:
+        print("Without the missing pieces, a run still works but omits: "
+              + ", ".join(missing) + ".")
+    else:
+        print("Everything is available: a design can be built, validated, "
+              "simulated, routed and manufactured here.")
+    return 0
+
+
 def _terminal_clarifier():
     """
     Read answers from the terminal.
@@ -711,6 +871,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if getattr(args, "diagnose", False):
+        return _run_diagnose()
     try:
         return asyncio.run(_run(args))
     except RuntimeError as exc:

@@ -324,3 +324,78 @@ class TestWhichBoardIsPlotted:
         flashes = len(re.findall(r"D0?3\*", copper.read_text(errors="replace")))
         assert flashes > 0, "expected the pads to be plotted"
         assert draws == 0, "this board has no tracks, so none should be plotted"
+
+
+class TestDiagnose:
+    """
+    The first command a new contributor or agent should run.
+
+    It exists because "why was that stage skipped?" was answered by reading the
+    code. Every line it prints is measured: a tool is reported present only if it
+    ran and answered.
+    """
+
+    def test_it_runs_and_reports_the_essentials(self, capsys):
+        from src.cli import main
+
+        assert main(["--diagnose"]) == 0
+        output = capsys.readouterr().out
+        for expected in ("Python", "kicad-cli", "symbols", "footprints", "catalog"):
+            assert expected in output, expected
+
+    def test_it_says_what_is_missing_and_what_that_costs(self, capsys):
+        from src.cli import main
+
+        main(["--diagnose"])
+        output = capsys.readouterr().out
+        # Either everything is available, or the summary names what a run will
+        # omit. There is no silent third state.
+        assert ("Everything is available" in output) or ("a run still works but omits" in output)
+
+    def test_it_does_not_pretend_a_missing_catalog_is_present(self, capsys, monkeypatch):
+        from src.cli import main
+
+        monkeypatch.delenv("JLC_PARTS_CATALOG", raising=False)
+        main(["--diagnose"])
+        output = capsys.readouterr().out
+        assert "catalog" in output
+        if "ABSENT" in output:
+            # When the catalog is absent it must say what that costs and how to
+            # get one, not just that it is missing.
+            assert "36 templates" in output
+            assert "catalog-setup" in output
+
+
+class TestTheKicadCliResolver:
+    """
+    One answer to "where is kicad-cli", shared by the exporter and --diagnose.
+
+    They used to disagree: the exporter honoured DSH_KICAD_CLI and --diagnose
+    looked at PATH, so a machine with an override set would be told KiCad was
+    absent while manufacturing worked.
+    """
+
+    def test_dsh_kicad_cli_overrides_discovery(self, monkeypatch, tmp_path):
+        from src.generators.fabrication import kicad_cli_path
+
+        fake = tmp_path / "kicad-cli"
+        fake.write_text("#!/bin/sh\n")
+        monkeypatch.setenv("DSH_KICAD_CLI", str(fake))
+        assert kicad_cli_path() == str(fake)
+
+    def test_a_broken_override_is_reported_as_absent(self, monkeypatch):
+        """Not as "use PATH instead": the override is a statement of intent."""
+        from src.generators.fabrication import kicad_cli_path
+
+        monkeypatch.setenv("DSH_KICAD_CLI", "/nonexistent/kicad-cli")
+        assert kicad_cli_path() is None
+
+    def test_diagnose_reports_the_override(self, monkeypatch, capsys, tmp_path):
+        from src.cli import main
+
+        fake = tmp_path / "kicad-cli"
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        monkeypatch.setenv("DSH_KICAD_CLI", str(fake))
+        assert main(["--diagnose"]) == 0
+        output = capsys.readouterr().out
+        assert str(fake) in output

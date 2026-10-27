@@ -55,8 +55,14 @@ _GERBER_MAGIC = ("%FS", "%MO", "G04", "%TF")
 _DRILL_MAGIC = "M48"
 
 
-def _kicad_cli() -> Optional[str]:
-    """The KiCad CLI, or None when it is not installed."""
+def kicad_cli_path() -> Optional[str]:
+    """
+    The KiCad CLI, or None when it is not installed.
+
+    ``DSH_KICAD_CLI`` overrides discovery, which matters on systems with several
+    KiCad versions installed. ``--diagnose`` asks the same function, so the two
+    cannot disagree about whether KiCad is available.
+    """
     import os
 
     override = os.environ.get("DSH_KICAD_CLI")
@@ -201,7 +207,7 @@ def export_fabrication(
         output.errors.append(f"board not found: {pcb_path}")
         return output
 
-    cli = _kicad_cli()
+    cli = kicad_cli_path()
     if cli is None:
         output.errors.append(
             "kicad-cli was not found, so no Gerbers could be produced. Install "
