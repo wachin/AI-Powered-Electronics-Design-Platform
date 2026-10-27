@@ -727,7 +727,22 @@ Find open-source projects that could help.
   dependency in `pyproject.toml`; the two files are meant to mirror each other.
 - [x] **VERIFIED** - The documented onboarding path was walked in a clean
   `git clone`: `make install` → `make lint` → `make compile-check` → `make test`
-  → `make diagnose`, and the audit itself is what found the two failures above.
+  → `make diagnose`, and the audit itself is what found the failures above.
+- [x] **FIXED** - Installing KiCad 9 was not enough: `kicad-symbols` and
+  `kicad-footprints` are **Recommends** of the `kicad` package, so
+  `--no-install-recommends` left them out and 112 tests still failed — without
+  them `load_symbol("Device:R")` resolves nothing, the board gains no pads and
+  the position file comes out empty. Both CI jobs install the library packages
+  now, and the assertion step checks the library files on disk, because
+  "kicad-cli is 9" was true while nothing could be resolved.
+- [x] **VERIFIED - CI is green.** Run
+  [40573211366](https://github.com/wachin/AI-Powered-Electronics-Design-Platform/actions/runs/40573211366):
+  909 passed, 17 skipped, and the lint, compile-check and frontend jobs all
+  pass. Before this audit, every run of the workflow had failed.
+- [x] **IMPLEMENTED** - The README's static test-count badge (which read "249
+  passing" while the suite ran 909) is replaced by the live CI badge, which is
+  the one thing that cannot go stale. The note above it said a CI badge would
+  only be added once the workflow had actually run; it now has.
 
 ## Preparing the repository for agent-assisted development
 

@@ -1,14 +1,14 @@
 # AI-Powered Electronics Design Platform
 
 <!--
-  Badges are static on purpose. A CI status badge is only added once this
-  repository has actually run the "CI" workflow on GitHub, so that it reports a
-  real result instead of a plausible-looking placeholder.
-  Every claim below is verifiable: LICENSE, pyproject.toml, and the test suite.
+  The CI badge is the only dynamic one: it reports what the workflow actually
+  did, rather than a count that went stale (it said 249 for months). The rest are
+  static on purpose, and every claim below is verifiable: LICENSE,
+  pyproject.toml, and the test suite.
 -->
+[![CI](https://github.com/wachin/AI-Powered-Electronics-Design-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/wachin/AI-Powered-Electronics-Design-Platform/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-911%20passing%2C%2015%20skipped-brightgreen.svg)](tests/)
 [![KiCad](https://img.shields.io/badge/KiCad-9.x-1a5fb4.svg)](https://www.kicad.org/)
 [![ngspice](https://img.shields.io/badge/ngspice-44.x-orange.svg)](https://ngspice.sourceforge.io/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#known-limitations)
@@ -48,7 +48,7 @@ git clone https://github.com/wachin/AI-Powered-Electronics-Design-Platform
 cd AI-Powered-Electronics-Design-Platform
 python3 -m venv venv && venv/bin/pip install -e ".[dev]"
 make diagnose                  # what this machine can actually do
-make test                      # 911 passing, 15 skipped without the catalog
+make test                      # ~900 tests; some skip without the catalog
 ```
 
 Then give the agent three things: `AGENTS.md`, `docs/development.md`, and a
