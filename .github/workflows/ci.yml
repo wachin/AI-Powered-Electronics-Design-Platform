@@ -63,11 +63,16 @@ jobs:
         run: |
           sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends kicad ngspice
+          # kicad-symbols and kicad-footprints are Recommends of kicad, so
+          # --no-install-recommends leaves them out; without them every symbol
+          # resolves to nothing and the board has no pads. They are the libraries
+          # this project actually reads at runtime.
+          sudo apt-get install -y --no-install-recommends \
+            kicad kicad-symbols kicad-footprints ngspice
           kicad-cli --version
           ngspice --version | head -1
 
-      - name: Assert the KiCad version
+      - name: Assert the KiCad version and libraries
         run: |
           version="$(kicad-cli version)"
           echo "kicad-cli: $version"
@@ -75,11 +80,22 @@ jobs:
             9.*) echo "KiCad 9 present" ;;
             *) echo "::error::This project requires KiCad 9; got $version"; exit 1 ;;
           esac
+          # The version alone is not enough: the libraries are separate packages.
+          test -f /usr/share/kicad/symbols/Device.kicad_sym \
+            || { echo "::error::kicad-symbols is missing"; exit 1; }
+          test -d /usr/share/kicad/footprints/Resistor_SMD.pretty \
+            || { echo "::error::kicad-footprints is missing"; exit 1; }
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      # Printed for the log, and it fails nobody: the assertions above already
+      # guarantee the tools. It is here so a reader can see what the suite will
+      # be able to verify without reconstructing it from the install steps.
+      - name: Report the environment
+        run: python -m src.cli --diagnose
 
       # DSH_REQUIRE_KICAD=1 turns "kicad-cli missing" from a skip into a failure,
       # so a broken install cannot masquerade as a green build.
@@ -108,8 +124,11 @@ jobs:
         run: |
           sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends kicad ngspice
+          sudo apt-get install -y --no-install-recommends \
+            kicad kicad-symbols kicad-footprints ngspice
           kicad-cli --version
+          test -f /usr/share/kicad/symbols/Device.kicad_sym \
+            || { echo "::error::kicad-symbols is missing"; exit 1; }
 
       - name: Install Python dependencies
         run: |
