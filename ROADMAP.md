@@ -762,6 +762,25 @@ Find open-source projects that could help.
   checkout: the download is now **482,665 components** (the local copy says
   179,894), so the weekly job also catches taxonomy drift for free.
 
+- [x] **VERIFIED - The declared Python minimum is real.** `pyproject.toml` says
+  `requires-python = ">=3.10"` and only 3.12 had ever run the suite; 3.10 was
+  linted for syntax and nothing else, which is how a backslash inside an f-string
+  survived. The test job is now a matrix over **3.10 and 3.12**, and both pass
+  the full suite with KiCad 9 ([run
+  40585250572](https://github.com/wachin/AI-Powered-Electronics-Design-Platform/actions/runs/40585250572)).
+- [x] **VERIFIED - A clean clone works end to end.** `git clone` →
+  `make install` → `make diagnose` → `make lint` → `make test` gives 909 passed,
+  17 skipped, on commit `97ee6de`, with no pre-existing state on the machine.
+- [ ] **OPEN - The KiCad library search paths are Linux-only**
+  (`/usr/share/kicad/...`, `~/.local/share/kicad/...`). Nothing prevents a macOS
+  or Windows port, but nobody has run this there and the symbol and footprint
+  readers would find no libraries. A forker on those platforms should expect to
+  add their paths first.
+- [ ] **OPEN - `phono_preamp` has a generator but no build test.** It is not in
+  `WORKING_TOPOLOGIES`, so the clarification never offers it, and
+  `tests/test_topologies.py` does not exercise it. The four offered topologies
+  are covered; this fifth path is not.
+
 - [x] **IMPLEMENTED** - The README's static test-count badge (which read "249
   passing" while the suite ran 909) is replaced by the live CI badge, which is
   the one thing that cannot go stale. The note above it said a CI badge would
